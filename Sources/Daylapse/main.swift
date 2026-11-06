@@ -16,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let settings = SettingsStore.shared
         appRules = AppRules(settings: settings)
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = "○"
         statusItem.button?.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
 
@@ -51,10 +51,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 DaylapseLog.write("Screenshot failed: \(error.localizedDescription)")
             }
         }, pauseReason: { [weak self] in
-            self?.appRules.pauseReason() ?? .notAllowed
+            guard let self else { return .notAllowed }
+            return self.appRules.pauseReason()
         }, render: { [weak self] text in
-            self?.statusLine.title = text
-            self?.statusItem.button?.title = text
+            self?.renderStatus(text)
         })
         hotkey = Hotkey { [weak self] in
             Task { @MainActor in self?.toggleCapture() }
@@ -68,6 +68,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @MainActor @objc private func toggleCapture() {
         captureEngine.toggle()
         toggleItem.title = captureEngine.isStarted ? "Stop Screenshots" : "Start Screenshots"
+    }
+
+    @MainActor private func renderStatus(_ text: String) {
+        statusLine.title = text
+        statusItem.button?.title = text == AppRules.Pause.notAllowed.statusText ? "🚫" : text
     }
 
     @objc private func openScreenshotsFolder() {

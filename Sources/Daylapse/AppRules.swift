@@ -9,13 +9,11 @@ final class AppRules {
     }
 
     enum Pause: Equatable {
-        case blocked(String)
         case notAllowed
 
         var statusText: String {
             switch self {
-            case .blocked(let name): "⏸ \(String(name.prefix(14)))"
-            case .notAllowed: "⏸ Not allowed"
+            case .notAllowed: "🚫 Not allowed"
             }
         }
     }
@@ -52,8 +50,8 @@ final class AppRules {
                   current.allowedApps.contains(where: { $0.bundleID == bundleID }) else {
                 return .notAllowed
             }
-        } else if let blocked = current.blockedApps.first(where: { $0.bundleID == bundleID }) {
-            return .blocked(blocked.name)
+        } else if current.blockedApps.contains(where: { $0.bundleID == bundleID }) {
+            return .notAllowed
         }
         return nil
     }
@@ -116,14 +114,18 @@ final class AppRules {
     private func refreshFrontmost() {
         if let app = NSWorkspace.shared.frontmostApplication {
             recordFrontmost(app)
-        } else {
+        } else if lastExternalFrontmost != nil {
             lastExternalFrontmost = nil
+            DaylapseLog.write("Frontmost app unavailable")
         }
     }
 
     private func recordFrontmost(_ app: NSRunningApplication) {
         if app.bundleIdentifier == Bundle.main.bundleIdentifier { return }
-        lastExternalFrontmost = Frontmost(bundleID: app.bundleIdentifier, name: app.localizedName ?? app.bundleIdentifier ?? "Unknown")
+        let frontmost = Frontmost(bundleID: app.bundleIdentifier, name: app.localizedName ?? app.bundleIdentifier ?? "Unknown")
+        guard lastExternalFrontmost?.bundleID != frontmost.bundleID || lastExternalFrontmost?.name != frontmost.name else { return }
+        lastExternalFrontmost = frontmost
+        DaylapseLog.write("Frontmost app: \(frontmost.name) (\(frontmost.bundleID ?? "unknown bundle ID"))")
     }
 
     private func quoted(_ name: String) -> String { "\"\(name)\"" }

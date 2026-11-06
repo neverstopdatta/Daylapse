@@ -8,6 +8,7 @@ final class CaptureEngine {
     private let render: (String) -> Void
     private var timer: Timer?
     private var nextCapture: Date?
+    private var pausedRemaining: TimeInterval?
     private var captureInFlight = false
     private var activity: NSObjectProtocol?
     private var lastStatus = ""
@@ -33,9 +34,12 @@ final class CaptureEngine {
             reason: "Daylapse screenshot timer"
         )
         DaylapseLog.write("Capture started")
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
+        // Common modes keep the timer firing while the status menu is open.
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
         if pauseReason() == nil {
             performCapture()
             nextCapture = Date().addingTimeInterval(TimeInterval(max(1, settings.settings.intervalSeconds)))
@@ -49,6 +53,7 @@ final class CaptureEngine {
         timer?.invalidate()
         timer = nil
         nextCapture = nil
+        pausedRemaining = nil
         if let activity {
             ProcessInfo.processInfo.endActivity(activity)
             self.activity = nil
@@ -67,12 +72,17 @@ final class CaptureEngine {
             return
         }
         if let reason = pauseReason() {
-            nextCapture = nil
+            if let nextCapture {
+                pausedRemaining = max(0, nextCapture.timeIntervalSinceNow)
+                self.nextCapture = nil
+            }
             setStatus(reason.statusText)
             return
         }
         if nextCapture == nil {
-            nextCapture = Date().addingTimeInterval(TimeInterval(max(1, settings.settings.intervalSeconds)))
+            let interval = TimeInterval(max(1, settings.settings.intervalSeconds))
+            nextCapture = Date().addingTimeInterval(min(pausedRemaining ?? interval, interval))
+            pausedRemaining = nil
         }
         if let nextCapture, Date() >= nextCapture, !captureInFlight {
             performCapture()
