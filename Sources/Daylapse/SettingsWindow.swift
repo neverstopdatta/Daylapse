@@ -37,7 +37,7 @@ private struct SettingsWindowView: View {
                 .tabItem { Text("Apps") }
             placeholder("Storage")
                 .tabItem { Text("Storage") }
-            placeholder("Timelapse")
+            TimelapseTab(settings: $settings)
                 .tabItem { Text("Timelapse") }
         }
         .padding()
@@ -173,5 +173,61 @@ private struct SettingsWindowView: View {
             return NSWorkspace.shared.icon(forFile: url.path)
         }
         return NSWorkspace.shared.icon(for: .application)
+    }
+}
+
+private struct TimelapseTab: View {
+    @Binding var settings: DaylapseSettings
+    @State private var days: [Exporter.Day] = []
+    @State private var selected: Set<String> = []
+    @State private var exporting = false
+
+    var body: some View {
+        Form {
+            Picker("Frame rate", selection: $settings.exportFPS) {
+                ForEach([8, 12, 24, 30], id: \.self) { Text("\($0) fps").tag($0) }
+            }
+            Section("Days") {
+                if days.isEmpty {
+                    Text("No days captured yet").foregroundStyle(.secondary)
+                }
+                ForEach(days) { day in
+                    Toggle(isOn: Binding(
+                        get: { selected.contains(day.name) },
+                        set: { if $0 { selected.insert(day.name) } else { selected.remove(day.name) } }
+                    )) {
+                        Text(day.name) + Text("  \(day.frameCount) frames").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            HStack {
+                Button("Refresh") { reload() }
+                Button(exporting ? "Exporting…" : "Export") { export() }
+                    .disabled(exporting || selected.isEmpty)
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear(perform: reload)
+    }
+
+    private func reload() {
+        days = Exporter.days(in: Storage.screenshotsFolder)
+        selected = selected.filter { name in days.contains { $0.name == name } }
+    }
+
+    private func export() {
+        exporting = true
+        let chosen = selected.sorted()
+        let fps = settings.exportFPS
+        DispatchQueue.global().async {
+            var results: [Result<[URL], Error>] = []
+            for day in chosen {
+                results.append(Result { try Exporter.export(day: day, fps: fps, in: Storage.screenshotsFolder) })
+            }
+            DispatchQueue.main.async {
+                exporting = false
+                for result in results { AppDelegate.finishExport(result) }
+            }
+        }
     }
 }

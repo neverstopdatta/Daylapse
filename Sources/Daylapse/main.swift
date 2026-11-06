@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var appRules: AppRules!
     private var systemState: SystemState!
     private var blockItem: NSMenuItem!
+    private var exportItem: NSMenuItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let settings = SettingsStore.shared
@@ -33,8 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         blockItem = NSMenuItem(title: "Block Frontmost App", action: #selector(toggleFrontmostRule), keyEquivalent: "")
         menu.addItem(blockItem)
         menu.addItem(.separator())
-        let exportItem = NSMenuItem(title: "Export Today as Video", action: nil, keyEquivalent: "")
-        exportItem.isEnabled = false
+        exportItem = NSMenuItem(title: "Export Today as Video", action: #selector(exportToday), keyEquivalent: "")
         menu.addItem(exportItem)
         let folderItem = NSMenuItem(title: "Open Screenshots Folder", action: #selector(openScreenshotsFolder), keyEquivalent: "")
         menu.addItem(folderItem)
@@ -75,6 +75,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @MainActor private func renderStatus(_ text: String) {
         statusLine.title = text
         statusItem.button?.title = text == AppRules.Pause.notAllowed.statusText ? "🚫" : text
+    }
+
+    @MainActor @objc private func exportToday() {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        let day = formatter.string(from: Date())
+        exportItem.title = "Exporting…"
+        exportItem.isEnabled = false
+        let fps = SettingsStore.shared.settings.exportFPS
+        DispatchQueue.global().async {
+            let result = Result { try Exporter.export(day: day, fps: fps, in: Storage.screenshotsFolder) }
+            DispatchQueue.main.async { [weak self] in
+                self?.exportItem.title = "Export Today as Video"
+                self?.exportItem.isEnabled = true
+                Self.finishExport(result)
+            }
+        }
+    }
+
+    @MainActor static func finishExport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            DaylapseLog.write("Exported \(urls.map(\.lastPathComponent).joined(separator: ", "))")
+            NSWorkspace.shared.activateFileViewerSelecting(urls)
+        case .failure(let error):
+            DaylapseLog.write("Export failed: \(error.localizedDescription)")
+            let alert = NSAlert()
+            alert.messageText = "Export failed"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
     }
 
     @objc private func openScreenshotsFolder() {
