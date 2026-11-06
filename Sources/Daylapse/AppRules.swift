@@ -127,7 +127,18 @@ final class AppRules {
         var excludedIDs = Set(snapshot.blockedApps.map(\.bundleID))
         if let ownBundleID = Bundle.main.bundleIdentifier { excludedIDs.insert(ownBundleID) }
         if !snapshot.showNotifications { excludedIDs.insert(DaylapseSettings.notificationBundleID) }
-        if !snapshot.showWallpaper { excludedIDs.insert(DaylapseSettings.wallpaperBundleID) }
+
+        // Excluding the wallpaper app does not remove the wallpaper, so hide it by window instead.
+        // That is the only way the background colour can show through.
+        if !snapshot.showWallpaper {
+            let hidden = content.windows.filter { window in
+                let id = window.owningApplication?.bundleIdentifier ?? ""
+                if excludedIDs.contains(id) || isWallpaperWindow(window) { return true }
+                return !snapshot.showDesktopIcons && id == finderID && window.windowLayer < 0
+            }
+            return SCContentFilter(display: display, excludingWindows: hidden)
+        }
+
         // Hiding Finder also hides the desktop icons, so keep its normal windows.
         var keptWindows: [SCWindow] = []
         if !snapshot.showDesktopIcons, !excludedIDs.contains(finderID) {
@@ -136,6 +147,18 @@ final class AppRules {
         }
         let excluded = content.applications.filter { excludedIDs.contains($0.bundleIdentifier) }
         return SCContentFilter(display: display, excludingApplications: excluded, exceptingWindows: keptWindows)
+    }
+
+    // The picture is drawn by three windows: the wallpaper agent's, a Dock window titled
+    // "Wallpaper-…", and an ownerless "Desktop" backing. All three must go for the fill to show.
+    private func isWallpaperWindow(_ window: SCWindow) -> Bool {
+        let id = window.owningApplication?.bundleIdentifier ?? ""
+        switch id {
+        case DaylapseSettings.wallpaperBundleID: return true
+        case "com.apple.dock": return (window.title ?? "").hasPrefix("Wallpaper")
+        case "": return window.title == "Desktop"
+        default: return false
+        }
     }
 
     // M8 experiment: shows which apps own on-screen windows, to confirm who draws notifications.

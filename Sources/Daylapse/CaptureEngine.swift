@@ -10,6 +10,7 @@ final class CaptureEngine {
     private var nextCapture: Date?
     private var pausedRemaining: TimeInterval?
     private var scheduledInterval: TimeInterval?
+    private var pendingStartCapture = false
     private var captureInFlight = false
     private var activity: NSObjectProtocol?
     private var lastStatus = ""
@@ -49,7 +50,10 @@ final class CaptureEngine {
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
         if pauseReason() == nil {
-            if settings.settings.captureOnStart { performCapture() }
+            if settings.settings.captureOnStart {
+                // A held countdown wins: the first shot waits until the menu or Settings is dismissed.
+                if isHeldByMenu { pendingStartCapture = true } else { performCapture() }
+            }
             nextCapture = Date().addingTimeInterval(TimeInterval(max(1, settings.settings.intervalSeconds)))
         }
         tick()
@@ -61,6 +65,7 @@ final class CaptureEngine {
         timer?.invalidate()
         timer = nil
         nextCapture = nil
+        pendingStartCapture = false
         scheduledInterval = nil
         pausedRemaining = nil
         if let activity {
@@ -85,11 +90,16 @@ final class CaptureEngine {
             setStatus(reason.statusText)
             return
         }
-        if isMenuOpen || isSettingsActive, settings.settings.pauseWhenMenuOpen {
+        if isHeldByMenu {
             holdCountdown()
             let remaining = pausedRemaining ?? TimeInterval(max(1, settings.settings.intervalSeconds))
             setStatus("⏸ \(Int(ceil(remaining)))s")
             return
+        }
+        if pendingStartCapture {
+            pendingStartCapture = false
+            performCapture()
+            nextCapture = Date().addingTimeInterval(TimeInterval(max(1, settings.settings.intervalSeconds)))
         }
         if nextCapture == nil {
             let interval = TimeInterval(max(1, settings.settings.intervalSeconds))
@@ -110,6 +120,10 @@ final class CaptureEngine {
         }
         let seconds = max(0, Int(ceil((nextCapture ?? Date()).timeIntervalSinceNow)))
         setStatus("● \(seconds)s")
+    }
+
+    private var isHeldByMenu: Bool {
+        (isMenuOpen || isSettingsActive) && settings.settings.pauseWhenMenuOpen
     }
 
     private func holdCountdown() {
