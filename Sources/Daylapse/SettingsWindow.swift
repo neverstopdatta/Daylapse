@@ -4,6 +4,8 @@ import UniformTypeIdentifiers
 
 @MainActor
 final class SettingsWindowController: NSWindowController {
+    private var clickMonitor: Any?
+
     convenience init() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 560, height: 430),
@@ -15,6 +17,16 @@ final class SettingsWindowController: NSWindowController {
         window.center()
         window.contentView = NSHostingView(rootView: SettingsWindowView())
         self.init(window: window)
+        // Clicking outside a text field ends editing.
+        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak window] event in
+            if let window, event.window === window,
+               let editor = window.firstResponder as? NSTextView, editor.isFieldEditor,
+               !editor.bounds.contains(editor.convert(event.locationInWindow, from: nil)) {
+                // Resign before the click is delivered so it can focus another field in one go.
+                window.makeFirstResponder(nil)
+            }
+            return event
+        }
     }
 
     func showSettings() {
@@ -26,16 +38,18 @@ final class SettingsWindowController: NSWindowController {
 
 private struct SettingsWindowView: View {
     @State private var settings = SettingsStore.shared.settings
+    // The last value this window wrote, so its own save is not echoed back over newer edits.
+    @State private var lastSaved: DaylapseSettings?
 
     var body: some View {
         TabView {
-            placeholder("General")
+            GeneralTab(settings: $settings)
                 .tabItem { Text("General") }
-            captureTab
+            CaptureTab(settings: $settings)
                 .tabItem { Text("Capture") }
             appsTab
                 .tabItem { Text("Apps") }
-            placeholder("Storage")
+            StorageTab(settings: $settings)
                 .tabItem { Text("Storage") }
             TimelapseTab(settings: $settings)
                 .tabItem { Text("Timelapse") }
@@ -43,6 +57,7 @@ private struct SettingsWindowView: View {
         .padding()
         .frame(minWidth: 520, minHeight: 390)
         .onChange(of: settings) { _, newSettings in
+            lastSaved = newSettings
             do {
                 try SettingsStore.shared.save(newSettings)
             } catch {
@@ -51,15 +66,9 @@ private struct SettingsWindowView: View {
         }
         // The menu's block item saves directly, so keep this copy current.
         .onChange(of: SettingsStore.shared.settings) { _, newSettings in
+            guard newSettings != lastSaved else { return }
             settings = newSettings
         }
-    }
-
-    private var captureTab: some View {
-        Form {
-            Toggle("Pause timer while the menu is open", isOn: $settings.pauseWhenMenuOpen)
-        }
-        .formStyle(.grouped)
     }
 
     private var appsTab: some View {
@@ -125,14 +134,6 @@ private struct SettingsWindowView: View {
                 return AppRuleEntry(bundleID: bundleID, name: app.localizedName ?? bundleID)
             }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-    }
-
-    private func placeholder(_ title: String) -> some View {
-        Form {
-            Text("\(title) settings will be available in a later milestone.")
-                .foregroundStyle(.secondary)
-        }
-        .formStyle(.grouped)
     }
 
     private func addAppFromDisk() {

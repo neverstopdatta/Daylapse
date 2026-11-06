@@ -146,9 +146,11 @@ final class SettingsStore {
                 }
             }
         }
+        Storage.folderPath = settings.folderPath
     }
 
     func save(_ newSettings: DaylapseSettings) throws {
+        Storage.folderPath = newSettings.folderPath
         let directory = fileURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(newSettings)

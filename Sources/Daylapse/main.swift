@@ -25,7 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let menu = NSMenu()
         toggleItem = NSMenuItem(title: "Start Screenshots", action: #selector(toggleCapture), keyEquivalent: "s")
-        toggleItem.keyEquivalentModifierMask = [.option, .shift]
+        applyToggleShortcut(settings.settings.shortcut.keyCode, settings.settings.shortcut.carbonModifiers)
         menu.addItem(toggleItem)
         statusLine = NSMenuItem(title: "○", action: nil, keyEquivalent: "")
         statusLine.isEnabled = false
@@ -61,9 +61,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hotkey = Hotkey { [weak self] in
             Task { @MainActor in self?.toggleCapture() }
         }
+        ShortcutRegistrar.apply = { [weak self] keyCode, modifiers in
+            guard let self else { return false }
+            if self.hotkey.register(keyCode: keyCode, carbonModifiers: modifiers) {
+                self.applyToggleShortcut(keyCode, modifiers)
+                return true
+            }
+            let old = SettingsStore.shared.settings.shortcut
+            _ = self.hotkey.register(keyCode: old.keyCode, carbonModifiers: old.carbonModifiers)
+            return false
+        }
+        runRetention()
+        let retentionTimer = Timer(timeInterval: 3600, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.runRetention() }
+        }
+        RunLoop.main.add(retentionTimer, forMode: .common)
         if !hotkey.register(keyCode: settings.settings.shortcut.keyCode,
                             carbonModifiers: settings.settings.shortcut.carbonModifiers) {
             DaylapseLog.write("Global shortcut registration failed")
+        }
+    }
+
+    @MainActor private func applyToggleShortcut(_ keyCode: UInt32, _ modifiers: UInt32) {
+        toggleItem.keyEquivalent = KeyNames.character(for: keyCode) ?? ""
+        toggleItem.keyEquivalentModifierMask = KeyNames.menuModifierMask(modifiers)
+    }
+
+    @MainActor private func runRetention() {
+        let current = SettingsStore.shared.settings
+        guard current.deleteAfterDays > 0 else { return }
+        let folder = Storage.screenshotsFolder
+        DispatchQueue.global(qos: .utility).async {
+            let count = Storage.deleteDays(in: folder, olderThan: current.deleteAfterDays, permanently: current.deletePermanently)
+            if count > 0 { DaylapseLog.write("Retention removed \(count) day folders") }
         }
     }
 

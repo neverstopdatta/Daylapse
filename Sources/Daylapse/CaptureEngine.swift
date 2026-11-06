@@ -9,6 +9,7 @@ final class CaptureEngine {
     private var timer: Timer?
     private var nextCapture: Date?
     private var pausedRemaining: TimeInterval?
+    private var scheduledInterval: TimeInterval?
     private var captureInFlight = false
     private var activity: NSObjectProtocol?
     private var lastStatus = ""
@@ -56,6 +57,7 @@ final class CaptureEngine {
         timer?.invalidate()
         timer = nil
         nextCapture = nil
+        scheduledInterval = nil
         pausedRemaining = nil
         if let activity {
             ProcessInfo.processInfo.endActivity(activity)
@@ -90,6 +92,12 @@ final class CaptureEngine {
             nextCapture = Date().addingTimeInterval(min(pausedRemaining ?? interval, interval))
             pausedRemaining = nil
         }
+        let interval = TimeInterval(max(1, settings.settings.intervalSeconds))
+        // Shift the pending shot by however much the interval changed, up or down.
+        if let pending = nextCapture, let old = scheduledInterval, old != interval {
+            nextCapture = max(Date(), pending.addingTimeInterval(interval - old))
+        }
+        scheduledInterval = interval
         if let nextCapture, Date() >= nextCapture, !captureInFlight {
             performCapture()
             self.nextCapture = Date().addingTimeInterval(TimeInterval(max(1, settings.settings.intervalSeconds)))
