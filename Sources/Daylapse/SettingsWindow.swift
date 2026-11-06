@@ -105,6 +105,13 @@ private struct SettingsWindowView: View {
                 Text(settings.appMode == "block" ? "Blocked apps" : "Allowed apps")
             }
 
+            if settings.appMode == "block" {
+                Section("Also hide") {
+                    Toggle("Notifications", isOn: $settings.hideNotifications)
+                    Toggle("Desktop icons", isOn: $settings.hideDesktopIcons)
+                }
+            }
+
             HStack {
                 Button("Add App…", action: addAppFromDisk)
                 Menu("Add Running App") {

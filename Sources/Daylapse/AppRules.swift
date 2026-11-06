@@ -25,6 +25,7 @@ final class AppRules {
     private let settings: SettingsStore
     private(set) var lastExternalFrontmost: Frontmost?
     private var observer: NSObjectProtocol?
+    private var lastLoggedOwners: Set<String> = []
 
     init(settings: SettingsStore) {
         self.settings = settings
@@ -103,11 +104,29 @@ final class AppRules {
             return SCContentFilter(display: display, including: includedApplications, exceptingWindows: [])
         }
 
-        let excludedIDs = Set(snapshot.blockedApps.map(\.bundleID)).union(Set(ownBundleID.map { [$0] } ?? []))
-        let excludedApplications = content.applications.filter { app in
-            excludedIDs.contains(app.bundleIdentifier)
+        logWindowOwners(content)
+        var excludedIDs = Set(snapshot.blockedApps.map(\.bundleID))
+        if let ownBundleID { excludedIDs.insert(ownBundleID) }
+        if snapshot.hideNotifications { excludedIDs.insert("com.apple.notificationcenterui") }
+        // Desktop icons are Finder windows below layer 0, so hide Finder but keep its normal windows.
+        var keptWindows: [SCWindow] = []
+        let hideIcons = snapshot.hideDesktopIcons && !snapshot.blockedApps.contains { $0.bundleID == "com.apple.finder" }
+        if hideIcons {
+            excludedIDs.insert("com.apple.finder")
+            keptWindows = content.windows.filter {
+                $0.owningApplication?.bundleIdentifier == "com.apple.finder" && $0.windowLayer == 0
+            }
         }
-        return SCContentFilter(display: display, excludingApplications: excludedApplications, exceptingWindows: [])
+        let excludedApplications = content.applications.filter { excludedIDs.contains($0.bundleIdentifier) }
+        return SCContentFilter(display: display, excludingApplications: excludedApplications, exceptingWindows: keptWindows)
+    }
+
+    // M8 experiment: shows which apps own on-screen windows, to confirm who draws notifications.
+    private func logWindowOwners(_ content: SCShareableContent) {
+        let owners = Set(content.windows.compactMap { $0.owningApplication?.bundleIdentifier })
+        guard owners != lastLoggedOwners else { return }
+        lastLoggedOwners = owners
+        DaylapseLog.write("Window owners: \(owners.sorted().joined(separator: ", "))")
     }
 
     func frontmostStillAllowsCapture(settings snapshot: DaylapseSettings) -> Bool {
