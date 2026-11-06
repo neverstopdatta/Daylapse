@@ -13,6 +13,9 @@ final class CaptureEngine {
     private var activity: NSObjectProtocol?
     private var lastStatus = ""
     private(set) var isStarted = false
+    var isMenuOpen = false {
+        didSet { tick() }
+    }
 
     init(
         settings: SettingsStore,
@@ -72,11 +75,14 @@ final class CaptureEngine {
             return
         }
         if let reason = pauseReason() {
-            if let nextCapture {
-                pausedRemaining = max(0, nextCapture.timeIntervalSinceNow)
-                self.nextCapture = nil
-            }
+            holdCountdown()
             setStatus(reason.statusText)
+            return
+        }
+        if isMenuOpen, settings.settings.pauseWhenMenuOpen {
+            holdCountdown()
+            let remaining = pausedRemaining ?? TimeInterval(max(1, settings.settings.intervalSeconds))
+            setStatus("⏸ \(Int(ceil(remaining)))s")
             return
         }
         if nextCapture == nil {
@@ -90,6 +96,12 @@ final class CaptureEngine {
         }
         let seconds = max(0, Int(ceil((nextCapture ?? Date()).timeIntervalSinceNow)))
         setStatus("● \(seconds)s")
+    }
+
+    private func holdCountdown() {
+        guard let nextCapture else { return }
+        pausedRemaining = max(0, nextCapture.timeIntervalSinceNow)
+        self.nextCapture = nil
     }
 
     private func performCapture() {

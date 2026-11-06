@@ -31,7 +31,7 @@ private struct SettingsWindowView: View {
         TabView {
             placeholder("General")
                 .tabItem { Text("General") }
-            placeholder("Capture")
+            captureTab
                 .tabItem { Text("Capture") }
             appsTab
                 .tabItem { Text("Apps") }
@@ -49,6 +49,17 @@ private struct SettingsWindowView: View {
                 DaylapseLog.write("Could not save settings: \(error.localizedDescription)")
             }
         }
+        // The menu's block item saves directly, so keep this copy current.
+        .onChange(of: SettingsStore.shared.settings) { _, newSettings in
+            settings = newSettings
+        }
+    }
+
+    private var captureTab: some View {
+        Form {
+            Toggle("Pause timer while the menu is open", isOn: $settings.pauseWhenMenuOpen)
+        }
+        .formStyle(.grouped)
     }
 
     private var appsTab: some View {

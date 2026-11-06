@@ -97,6 +97,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @MainActor func menuWillOpen(_ menu: NSMenu) {
         updateBlockMenuItem()
+        captureEngine.isMenuOpen = true
+    }
+
+    @MainActor func menuDidClose(_ menu: NSMenu) {
+        captureEngine.isMenuOpen = false
     }
 
     @MainActor private func updateBlockMenuItem() {

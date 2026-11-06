@@ -19,6 +19,7 @@ struct DaylapseSettings: Codable, Equatable {
     var showPointer: Bool
     var pauseWhenIdleSeconds: Int
     var pauseWhenLocked: Bool
+    var pauseWhenMenuOpen: Bool
     var displays: String
     var halfSizeOnRetina: Bool
     var jpegQuality: Double
@@ -39,6 +40,7 @@ struct DaylapseSettings: Codable, Equatable {
         showPointer: false,
         pauseWhenIdleSeconds: 60,
         pauseWhenLocked: true,
+        pauseWhenMenuOpen: false,
         displays: "all",
         halfSizeOnRetina: true,
         jpegQuality: 0.7,
@@ -56,7 +58,7 @@ struct DaylapseSettings: Codable, Equatable {
     )
 
     private enum CodingKeys: String, CodingKey {
-        case intervalSeconds, showPointer, pauseWhenIdleSeconds, pauseWhenLocked, displays
+        case intervalSeconds, showPointer, pauseWhenIdleSeconds, pauseWhenLocked, pauseWhenMenuOpen, displays
         case halfSizeOnRetina, jpegQuality, appMode, blockedApps, allowedApps
         case hideNotifications, hideDesktopIcons, folderPath, deleteAfterDays
         case deletePermanently, minFreeSpaceGB, exportFPS, shortcut
@@ -69,6 +71,7 @@ struct DaylapseSettings: Codable, Equatable {
         showPointer = try values.decodeIfPresent(Bool.self, forKey: .showPointer) ?? defaults.showPointer
         pauseWhenIdleSeconds = try values.decodeIfPresent(Int.self, forKey: .pauseWhenIdleSeconds) ?? defaults.pauseWhenIdleSeconds
         pauseWhenLocked = try values.decodeIfPresent(Bool.self, forKey: .pauseWhenLocked) ?? defaults.pauseWhenLocked
+        pauseWhenMenuOpen = try values.decodeIfPresent(Bool.self, forKey: .pauseWhenMenuOpen) ?? defaults.pauseWhenMenuOpen
         displays = try values.decodeIfPresent(String.self, forKey: .displays) ?? defaults.displays
         halfSizeOnRetina = try values.decodeIfPresent(Bool.self, forKey: .halfSizeOnRetina) ?? defaults.halfSizeOnRetina
         jpegQuality = try values.decodeIfPresent(Double.self, forKey: .jpegQuality) ?? defaults.jpegQuality
@@ -87,7 +90,7 @@ struct DaylapseSettings: Codable, Equatable {
 
     init(
         intervalSeconds: Int, showPointer: Bool, pauseWhenIdleSeconds: Int, pauseWhenLocked: Bool,
-        displays: String, halfSizeOnRetina: Bool, jpegQuality: Double, appMode: String,
+        pauseWhenMenuOpen: Bool, displays: String, halfSizeOnRetina: Bool, jpegQuality: Double, appMode: String,
         blockedApps: [AppRuleEntry], allowedApps: [AppRuleEntry], hideNotifications: Bool,
         hideDesktopIcons: Bool, folderPath: String, deleteAfterDays: Int, deletePermanently: Bool,
         minFreeSpaceGB: Int, exportFPS: Int, shortcut: ShortcutSettings
@@ -96,6 +99,7 @@ struct DaylapseSettings: Codable, Equatable {
         self.showPointer = showPointer
         self.pauseWhenIdleSeconds = pauseWhenIdleSeconds
         self.pauseWhenLocked = pauseWhenLocked
+        self.pauseWhenMenuOpen = pauseWhenMenuOpen
         self.displays = displays
         self.halfSizeOnRetina = halfSizeOnRetina
         self.jpegQuality = jpegQuality
