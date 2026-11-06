@@ -17,6 +17,10 @@ final class CaptureEngine {
     var isMenuOpen = false {
         didSet { tick() }
     }
+    // The Settings window counts like the open menu for "Pause while menu is open".
+    var isSettingsActive = false {
+        didSet { tick() }
+    }
 
     init(
         settings: SettingsStore,
@@ -81,7 +85,7 @@ final class CaptureEngine {
             setStatus(reason.statusText)
             return
         }
-        if isMenuOpen, settings.settings.pauseWhenMenuOpen {
+        if isMenuOpen || isSettingsActive, settings.settings.pauseWhenMenuOpen {
             holdCountdown()
             let remaining = pausedRemaining ?? TimeInterval(max(1, settings.settings.intervalSeconds))
             setStatus("⏸ \(Int(ceil(remaining)))s")

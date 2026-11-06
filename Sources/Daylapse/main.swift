@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var toggleItem: NSMenuItem!
     private var statusLine: NSMenuItem!
     private var settingsWindowController: SettingsWindowController?
+    private var settingsObservers: [NSObjectProtocol] = []
     private var appRules: AppRules!
     private var systemState: SystemState!
     private var blockItem: NSMenuItem!
@@ -148,6 +149,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             settingsWindowController = SettingsWindowController()
         }
         settingsWindowController?.showSettings()
+        if let window = settingsWindowController?.window, settingsObservers.isEmpty {
+            let center = NotificationCenter.default
+            for (name, active) in [(NSWindow.didBecomeKeyNotification, true), (NSWindow.didResignKeyNotification, false),
+                                   (NSWindow.willCloseNotification, false)] {
+                settingsObservers.append(center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                    Task { @MainActor in self?.captureEngine.isSettingsActive = active }
+                })
+            }
+        }
+        captureEngine.isSettingsActive = settingsWindowController?.window?.isKeyWindow ?? false
     }
 
     @MainActor @objc private func toggleFrontmostRule() {

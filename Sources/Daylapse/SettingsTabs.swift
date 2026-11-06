@@ -40,14 +40,14 @@ struct CaptureTab: View {
         Form {
             Section {
                 DurationField(title: "Interval", seconds: $settings.intervalSeconds, range: 1...3600, zeroMeansOff: false)
-                Toggle("Take a screenshot as soon as capture starts", isOn: $settings.captureOnStart)
+                Toggle("Capture immediately on start", isOn: $settings.captureOnStart)
                 Toggle("Show pointer", isOn: $settings.showPointer)
             }
             Section {
             DurationField(title: "Pause when idle", seconds: $settings.pauseWhenIdleSeconds, range: 0...7200, zeroMeansOff: true,
                           note: "0 turns idle pausing off")
             Toggle("Pause when screen is locked", isOn: $settings.pauseWhenLocked)
-            Toggle("Pause timer while the menu is open", isOn: $settings.pauseWhenMenuOpen)
+            Toggle("Pause while menu is open", isOn: $settings.pauseWhenMenuOpen)
             }
             Section {
             Picker("Displays", selection: $settings.displays) {

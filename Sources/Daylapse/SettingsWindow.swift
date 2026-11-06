@@ -118,7 +118,7 @@ private struct SettingsWindowView: View {
                 }
             }
 
-            Section("Also show in screenshots") {
+            Section("Show in screenshots") {
                 Toggle("Wallpaper", isOn: $settings.showWallpaper)
                 if !settings.showWallpaper {
                     ColorPicker("Background colour", selection: Binding(
