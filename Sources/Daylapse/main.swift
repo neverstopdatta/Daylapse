@@ -1,5 +1,6 @@
 import AppKit
 
+// The app stays in the menu bar and has no Dock icon.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
 
