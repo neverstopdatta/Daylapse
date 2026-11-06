@@ -73,12 +73,14 @@ private struct SettingsWindowView: View {
 
     private var appsTab: some View {
         Form {
-            Picker("Capture", selection: $settings.appMode) {
-                Text("Capture everything except…").tag("block")
-                Text("Capture only…").tag("allow")
+            Section {
+                Picker("Capture", selection: $settings.appMode) {
+                    Text("Everything except…").tag("block")
+                    Text("Only…").tag("allow")
+                }
             }
 
-            Section {
+            Section(settings.appMode == "block" ? "Blocked apps" : "Allowed apps") {
                 if activeApps.isEmpty {
                     Text("No apps added")
                         .foregroundStyle(.secondary)
@@ -101,29 +103,31 @@ private struct SettingsWindowView: View {
                         }
                     }
                 }
-            } header: {
-                Text(settings.appMode == "block" ? "Blocked apps" : "Allowed apps")
-            }
-
-            if settings.appMode == "block" {
-                Section("Also hide") {
-                    Toggle("Notifications", isOn: $settings.hideNotifications)
-                    Toggle("Desktop icons", isOn: $settings.hideDesktopIcons)
-                }
-            }
-
-            HStack {
-                Button("Add App…", action: addAppFromDisk)
-                Menu("Add Running App") {
-                    let apps = runningApps
-                    if apps.isEmpty {
-                        Text("No running apps")
-                    } else {
-                        ForEach(apps) { app in
-                            Button(app.name) { add(app) }
+                HStack {
+                    Button("Add App…", action: addAppFromDisk)
+                    Menu("Add Running App") {
+                        let apps = runningApps
+                        if apps.isEmpty {
+                            Text("No running apps")
+                        } else {
+                            ForEach(apps) { app in
+                                Button(app.name) { add(app) }
+                            }
                         }
                     }
                 }
+            }
+
+            Section("Also show in screenshots") {
+                Toggle("Wallpaper", isOn: $settings.showWallpaper)
+                if !settings.showWallpaper {
+                    ColorPicker("Background colour", selection: Binding(
+                        get: { Color(hex: settings.backgroundHex) },
+                        set: { settings.backgroundHex = $0.hexString }
+                    ), supportsOpacity: false)
+                }
+                Toggle("Desktop icons", isOn: $settings.showDesktopIcons)
+                Toggle("Notifications", isOn: $settings.showNotifications)
             }
         }
         .formStyle(.grouped)
@@ -192,8 +196,18 @@ private struct TimelapseTab: View {
 
     var body: some View {
         Form {
-            Picker("Frame rate", selection: $settings.exportFPS) {
-                ForEach([8, 12, 24, 30], id: \.self) { Text("\($0) fps").tag($0) }
+            Section {
+                Picker("Speed", selection: $settings.exportFPS) {
+                    ForEach([8, 12, 24, 30], id: \.self) { Text("\($0) fps").tag($0) }
+                }
+                HStack {
+                    Text(selected.isEmpty ? "Select the days to export." : "\(selected.count) selected")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Refresh") { reload() }
+                    Button(exporting ? "Exporting…" : "Export") { export() }
+                        .disabled(exporting || selected.isEmpty)
+                }
             }
             Section("Days") {
                 if days.isEmpty {
@@ -204,14 +218,14 @@ private struct TimelapseTab: View {
                         get: { selected.contains(day.name) },
                         set: { if $0 { selected.insert(day.name) } else { selected.remove(day.name) } }
                     )) {
-                        Text(day.name) + Text("  \(day.frameCount) frames").foregroundStyle(.secondary)
+                        HStack {
+                            Text(day.name)
+                            Spacer()
+                            Text("\(day.frameCount) screenshots").foregroundStyle(.secondary)
+                        }
                     }
+                    .toggleStyle(.checkbox)
                 }
-            }
-            HStack {
-                Button("Refresh") { reload() }
-                Button(exporting ? "Exporting…" : "Export") { export() }
-                    .disabled(exporting || selected.isEmpty)
             }
         }
         .formStyle(.grouped)
@@ -237,5 +251,20 @@ private struct TimelapseTab: View {
                 for result in results { AppDelegate.finishExport(result) }
             }
         }
+    }
+}
+
+extension Color {
+    init(hex: String) {
+        let digits = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        let value = UInt32(digits, radix: 16) ?? 0
+        self.init(.sRGB, red: Double(value >> 16 & 0xFF) / 255, green: Double(value >> 8 & 0xFF) / 255,
+                  blue: Double(value & 0xFF) / 255)
+    }
+
+    var hexString: String {
+        let color = NSColor(self).usingColorSpace(.sRGB) ?? .black
+        return String(format: "#%02X%02X%02X", Int(round(color.redComponent * 255)),
+                      Int(round(color.greenComponent * 255)), Int(round(color.blueComponent * 255)))
     }
 }

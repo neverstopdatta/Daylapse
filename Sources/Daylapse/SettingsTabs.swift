@@ -9,6 +9,7 @@ struct GeneralTab: View {
 
     var body: some View {
         Form {
+            Section {
             Toggle("Launch at login", isOn: $launchAtLogin)
                 .onChange(of: launchAtLogin) { _, enabled in
                     do {
@@ -22,8 +23,11 @@ struct GeneralTab: View {
             if let loginError {
                 Text(loginError).foregroundStyle(.red)
             }
-            LabeledContent("Start/Stop shortcut") {
-                ShortcutRecorder(shortcut: $settings.shortcut)
+            }
+            Section {
+                LabeledContent("Start/Stop shortcut") {
+                    ShortcutRecorder(shortcut: $settings.shortcut)
+                }
             }
         }
         .formStyle(.grouped)
@@ -34,12 +38,18 @@ struct CaptureTab: View {
     @Binding var settings: DaylapseSettings
     var body: some View {
         Form {
-            DurationField(title: "Interval", seconds: $settings.intervalSeconds, range: 1...3600, zeroMeansOff: false)
-            Toggle("Show pointer", isOn: $settings.showPointer)
+            Section {
+                DurationField(title: "Interval", seconds: $settings.intervalSeconds, range: 1...3600, zeroMeansOff: false)
+                Toggle("Take a screenshot as soon as capture starts", isOn: $settings.captureOnStart)
+                Toggle("Show pointer", isOn: $settings.showPointer)
+            }
+            Section {
             DurationField(title: "Pause when idle", seconds: $settings.pauseWhenIdleSeconds, range: 0...7200, zeroMeansOff: true,
                           note: "0 turns idle pausing off")
             Toggle("Pause when screen is locked", isOn: $settings.pauseWhenLocked)
             Toggle("Pause timer while the menu is open", isOn: $settings.pauseWhenMenuOpen)
+            }
+            Section {
             Picker("Displays", selection: $settings.displays) {
                 Text("All displays").tag("all")
                 Text("Main display only").tag("main")
@@ -47,6 +57,7 @@ struct CaptureTab: View {
             Toggle("Half size on Retina", isOn: $settings.halfSizeOnRetina)
             LabeledContent("JPEG quality \(Int(settings.jpegQuality * 100))%") {
                 Slider(value: $settings.jpegQuality, in: 0.3...1.0)
+            }
             }
         }
         .formStyle(.grouped)
@@ -59,6 +70,7 @@ struct StorageTab: View {
 
     var body: some View {
         Form {
+            Section {
             LabeledContent("Folder") {
                 Text(settings.folderPath).lineLimit(1).truncationMode(.middle)
             }
@@ -68,13 +80,18 @@ struct StorageTab: View {
             }
             LabeledContent("Used", value: ByteCountFormatter.string(fromByteCount: usedBytes, countStyle: .file))
             Button("Delete All…", role: .destructive, action: deleteAll)
+            }
+            Section {
             Picker("Delete older than", selection: $settings.deleteAfterDays) {
                 Text("Never").tag(0)
                 ForEach([7, 30, 90, 365], id: \.self) { Text("\($0) days").tag($0) }
             }
             Toggle("Delete permanently (skip Trash)", isOn: $settings.deletePermanently)
+            }
+            Section {
             Picker("Minimum free space", selection: $settings.minFreeSpaceGB) {
                 ForEach([1, 2, 5, 10, 20], id: \.self) { Text("\($0) GB").tag($0) }
+            }
             }
         }
         .formStyle(.grouped)

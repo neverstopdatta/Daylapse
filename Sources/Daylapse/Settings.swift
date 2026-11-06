@@ -15,7 +15,11 @@ struct ShortcutSettings: Codable, Equatable {
 }
 
 struct DaylapseSettings: Codable, Equatable {
+    static let wallpaperBundleID = "com.apple.wallpaper.agent"
+    static let notificationBundleID = "com.apple.notificationcenterui"
+
     var intervalSeconds: Int
+    var captureOnStart: Bool
     var showPointer: Bool
     var pauseWhenIdleSeconds: Int
     var pauseWhenLocked: Bool
@@ -26,8 +30,10 @@ struct DaylapseSettings: Codable, Equatable {
     var appMode: String
     var blockedApps: [AppRuleEntry]
     var allowedApps: [AppRuleEntry]
-    var hideNotifications: Bool
-    var hideDesktopIcons: Bool
+    var showNotifications: Bool
+    var showDesktopIcons: Bool
+    var showWallpaper: Bool
+    var backgroundHex: String
     var folderPath: String
     var deleteAfterDays: Int
     var deletePermanently: Bool
@@ -37,6 +43,7 @@ struct DaylapseSettings: Codable, Equatable {
 
     static let defaults = DaylapseSettings(
         intervalSeconds: 30,
+        captureOnStart: true,
         showPointer: false,
         pauseWhenIdleSeconds: 60,
         pauseWhenLocked: true,
@@ -47,8 +54,10 @@ struct DaylapseSettings: Codable, Equatable {
         appMode: "block",
         blockedApps: [],
         allowedApps: [],
-        hideNotifications: true,
-        hideDesktopIcons: false,
+        showNotifications: false,
+        showDesktopIcons: true,
+        showWallpaper: true,
+        backgroundHex: "#000000",
         folderPath: "~/Pictures/Daylapse",
         deleteAfterDays: 0,
         deletePermanently: false,
@@ -58,16 +67,44 @@ struct DaylapseSettings: Codable, Equatable {
     )
 
     private enum CodingKeys: String, CodingKey {
-        case intervalSeconds, showPointer, pauseWhenIdleSeconds, pauseWhenLocked, pauseWhenMenuOpen, displays
+        case intervalSeconds, captureOnStart, showPointer, pauseWhenIdleSeconds, pauseWhenLocked, pauseWhenMenuOpen, displays
         case halfSizeOnRetina, jpegQuality, appMode, blockedApps, allowedApps
-        case hideNotifications, hideDesktopIcons, folderPath, deleteAfterDays
+        case showNotifications, showDesktopIcons, showWallpaper, backgroundHex, hideNotifications, hideDesktopIcons
+        case folderPath, deleteAfterDays
         case deletePermanently, minFreeSpaceGB, exportFPS, shortcut
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(intervalSeconds, forKey: .intervalSeconds)
+        try c.encode(captureOnStart, forKey: .captureOnStart)
+        try c.encode(showPointer, forKey: .showPointer)
+        try c.encode(pauseWhenIdleSeconds, forKey: .pauseWhenIdleSeconds)
+        try c.encode(pauseWhenLocked, forKey: .pauseWhenLocked)
+        try c.encode(pauseWhenMenuOpen, forKey: .pauseWhenMenuOpen)
+        try c.encode(displays, forKey: .displays)
+        try c.encode(halfSizeOnRetina, forKey: .halfSizeOnRetina)
+        try c.encode(jpegQuality, forKey: .jpegQuality)
+        try c.encode(appMode, forKey: .appMode)
+        try c.encode(blockedApps, forKey: .blockedApps)
+        try c.encode(allowedApps, forKey: .allowedApps)
+        try c.encode(showNotifications, forKey: .showNotifications)
+        try c.encode(showDesktopIcons, forKey: .showDesktopIcons)
+        try c.encode(showWallpaper, forKey: .showWallpaper)
+        try c.encode(backgroundHex, forKey: .backgroundHex)
+        try c.encode(folderPath, forKey: .folderPath)
+        try c.encode(deleteAfterDays, forKey: .deleteAfterDays)
+        try c.encode(deletePermanently, forKey: .deletePermanently)
+        try c.encode(minFreeSpaceGB, forKey: .minFreeSpaceGB)
+        try c.encode(exportFPS, forKey: .exportFPS)
+        try c.encode(shortcut, forKey: .shortcut)
     }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = Self.defaults
         intervalSeconds = try values.decodeIfPresent(Int.self, forKey: .intervalSeconds) ?? defaults.intervalSeconds
+        captureOnStart = try values.decodeIfPresent(Bool.self, forKey: .captureOnStart) ?? defaults.captureOnStart
         showPointer = try values.decodeIfPresent(Bool.self, forKey: .showPointer) ?? defaults.showPointer
         pauseWhenIdleSeconds = try values.decodeIfPresent(Int.self, forKey: .pauseWhenIdleSeconds) ?? defaults.pauseWhenIdleSeconds
         pauseWhenLocked = try values.decodeIfPresent(Bool.self, forKey: .pauseWhenLocked) ?? defaults.pauseWhenLocked
@@ -78,8 +115,15 @@ struct DaylapseSettings: Codable, Equatable {
         appMode = try values.decodeIfPresent(String.self, forKey: .appMode) ?? defaults.appMode
         blockedApps = try values.decodeIfPresent([AppRuleEntry].self, forKey: .blockedApps) ?? defaults.blockedApps
         allowedApps = try values.decodeIfPresent([AppRuleEntry].self, forKey: .allowedApps) ?? defaults.allowedApps
-        hideNotifications = try values.decodeIfPresent(Bool.self, forKey: .hideNotifications) ?? defaults.hideNotifications
-        hideDesktopIcons = try values.decodeIfPresent(Bool.self, forKey: .hideDesktopIcons) ?? defaults.hideDesktopIcons
+        // The old hide* keys are read once so existing settings files keep their meaning.
+        let legacyHideNotifications = try values.decodeIfPresent(Bool.self, forKey: .hideNotifications)
+        let legacyHideIcons = try values.decodeIfPresent(Bool.self, forKey: .hideDesktopIcons)
+        showNotifications = try values.decodeIfPresent(Bool.self, forKey: .showNotifications)
+            ?? legacyHideNotifications.map { !$0 } ?? defaults.showNotifications
+        showDesktopIcons = try values.decodeIfPresent(Bool.self, forKey: .showDesktopIcons)
+            ?? legacyHideIcons.map { !$0 } ?? defaults.showDesktopIcons
+        showWallpaper = try values.decodeIfPresent(Bool.self, forKey: .showWallpaper) ?? defaults.showWallpaper
+        backgroundHex = try values.decodeIfPresent(String.self, forKey: .backgroundHex) ?? defaults.backgroundHex
         folderPath = try values.decodeIfPresent(String.self, forKey: .folderPath) ?? defaults.folderPath
         deleteAfterDays = try values.decodeIfPresent(Int.self, forKey: .deleteAfterDays) ?? defaults.deleteAfterDays
         deletePermanently = try values.decodeIfPresent(Bool.self, forKey: .deletePermanently) ?? defaults.deletePermanently
@@ -89,13 +133,14 @@ struct DaylapseSettings: Codable, Equatable {
     }
 
     init(
-        intervalSeconds: Int, showPointer: Bool, pauseWhenIdleSeconds: Int, pauseWhenLocked: Bool,
+        intervalSeconds: Int, captureOnStart: Bool, showPointer: Bool, pauseWhenIdleSeconds: Int, pauseWhenLocked: Bool,
         pauseWhenMenuOpen: Bool, displays: String, halfSizeOnRetina: Bool, jpegQuality: Double, appMode: String,
-        blockedApps: [AppRuleEntry], allowedApps: [AppRuleEntry], hideNotifications: Bool,
-        hideDesktopIcons: Bool, folderPath: String, deleteAfterDays: Int, deletePermanently: Bool,
+        blockedApps: [AppRuleEntry], allowedApps: [AppRuleEntry], showNotifications: Bool,
+        showDesktopIcons: Bool, showWallpaper: Bool, backgroundHex: String, folderPath: String, deleteAfterDays: Int, deletePermanently: Bool,
         minFreeSpaceGB: Int, exportFPS: Int, shortcut: ShortcutSettings
     ) {
         self.intervalSeconds = intervalSeconds
+        self.captureOnStart = captureOnStart
         self.showPointer = showPointer
         self.pauseWhenIdleSeconds = pauseWhenIdleSeconds
         self.pauseWhenLocked = pauseWhenLocked
@@ -106,8 +151,10 @@ struct DaylapseSettings: Codable, Equatable {
         self.appMode = appMode
         self.blockedApps = blockedApps
         self.allowedApps = allowedApps
-        self.hideNotifications = hideNotifications
-        self.hideDesktopIcons = hideDesktopIcons
+        self.showNotifications = showNotifications
+        self.showDesktopIcons = showDesktopIcons
+        self.showWallpaper = showWallpaper
+        self.backgroundHex = backgroundHex
         self.folderPath = folderPath
         self.deleteAfterDays = deleteAfterDays
         self.deletePermanently = deletePermanently

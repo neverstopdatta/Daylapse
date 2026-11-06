@@ -27,11 +27,15 @@ enum Screenshotter {
                 configuration.width = Int(CGFloat(display.width) * scale)
                 configuration.height = Int(CGFloat(display.height) * scale)
                 configuration.showsCursor = settingsSnapshot.showPointer
+                // SCStreamConfiguration does not retain this colour, so keep it alive until the capture ends.
+                let background = backgroundColor(settingsSnapshot.backgroundHex)
+                configuration.backgroundColor = background
 
                 let image = try await SCScreenshotManager.captureImage(
                     contentFilter: filter,
                     configuration: configuration
                 )
+                withExtendedLifetime(background) {}
                 guard await appRules.frontmostStillAllowsCapture(settings: settingsSnapshot) else {
                     DaylapseLog.write("Display \(display.displayID) screenshot discarded: app rule changed during capture")
                     continue
@@ -43,6 +47,13 @@ enum Screenshotter {
                 DaylapseLog.write("Display \(display.displayID) screenshot skipped: \(error.localizedDescription)")
             }
         }
+    }
+
+    private static func backgroundColor(_ hex: String) -> CGColor {
+        let digits = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard digits.count == 6, let value = UInt32(digits, radix: 16) else { return CGColor(gray: 0, alpha: 1) }
+        return CGColor(srgbRed: CGFloat(value >> 16 & 0xFF) / 255, green: CGFloat(value >> 8 & 0xFF) / 255,
+                       blue: CGFloat(value & 0xFF) / 255, alpha: 1)
     }
 
     private static func writeJPEG(_ image: CGImage, displayID: CGDirectDisplayID, date: Date, quality: Double) throws {

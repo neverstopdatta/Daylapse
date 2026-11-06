@@ -93,32 +93,49 @@ final class AppRules {
     }
 
     func makeFilter(display: SCDisplay, content: SCShareableContent, settings snapshot: DaylapseSettings) -> SCContentFilter? {
-        let ownBundleID = Bundle.main.bundleIdentifier
+        logWindowOwners(content)
+        let finderID = "com.apple.finder"
+        let finderWindows = content.windows.filter { $0.owningApplication?.bundleIdentifier == finderID }
+        let normalFinderWindows = finderWindows.filter { $0.windowLayer == 0 }
+
         if snapshot.appMode == "allow" {
             guard !snapshot.allowedApps.isEmpty else { return nil }
             let allowedIDs = Set(snapshot.allowedApps.map(\.bundleID))
             guard allowedIDs.allSatisfy({ id in content.applications.contains(where: { $0.bundleIdentifier == id }) }) else {
                 return nil
             }
-            let includedApplications = content.applications.filter { allowedIDs.contains($0.bundleIdentifier) }
-            return SCContentFilter(display: display, including: includedApplications, exceptingWindows: [])
+            // Including apps never captures the desktop icons, so with icons on, hide every window
+            // that is not allowed instead. Hiding by window leaves wallpaper and icons visible.
+            if snapshot.showDesktopIcons {
+                let shown = allowedIDs
+                    .union(snapshot.showNotifications ? [DaylapseSettings.notificationBundleID] : [])
+                    .union(snapshot.showWallpaper ? [DaylapseSettings.wallpaperBundleID] : [])
+                let hidden = content.windows.filter { window in
+                    guard let id = window.owningApplication?.bundleIdentifier else { return true }
+                    if shown.contains(id) { return false }
+                    return !(id == finderID && window.windowLayer < 0)
+                }
+                return SCContentFilter(display: display, excludingWindows: hidden)
+            }
+            var includedIDs = allowedIDs
+            if snapshot.showNotifications { includedIDs.insert(DaylapseSettings.notificationBundleID) }
+            if snapshot.showWallpaper { includedIDs.insert(DaylapseSettings.wallpaperBundleID) }
+            let included = content.applications.filter { includedIDs.contains($0.bundleIdentifier) }
+            return SCContentFilter(display: display, including: included, exceptingWindows: [])
         }
 
-        logWindowOwners(content)
         var excludedIDs = Set(snapshot.blockedApps.map(\.bundleID))
-        if let ownBundleID { excludedIDs.insert(ownBundleID) }
-        if snapshot.hideNotifications { excludedIDs.insert("com.apple.notificationcenterui") }
-        // Desktop icons are Finder windows below layer 0, so hide Finder but keep its normal windows.
+        if let ownBundleID = Bundle.main.bundleIdentifier { excludedIDs.insert(ownBundleID) }
+        if !snapshot.showNotifications { excludedIDs.insert(DaylapseSettings.notificationBundleID) }
+        if !snapshot.showWallpaper { excludedIDs.insert(DaylapseSettings.wallpaperBundleID) }
+        // Hiding Finder also hides the desktop icons, so keep its normal windows.
         var keptWindows: [SCWindow] = []
-        let hideIcons = snapshot.hideDesktopIcons && !snapshot.blockedApps.contains { $0.bundleID == "com.apple.finder" }
-        if hideIcons {
-            excludedIDs.insert("com.apple.finder")
-            keptWindows = content.windows.filter {
-                $0.owningApplication?.bundleIdentifier == "com.apple.finder" && $0.windowLayer == 0
-            }
+        if !snapshot.showDesktopIcons, !excludedIDs.contains(finderID) {
+            excludedIDs.insert(finderID)
+            keptWindows = normalFinderWindows
         }
-        let excludedApplications = content.applications.filter { excludedIDs.contains($0.bundleIdentifier) }
-        return SCContentFilter(display: display, excludingApplications: excludedApplications, exceptingWindows: keptWindows)
+        let excluded = content.applications.filter { excludedIDs.contains($0.bundleIdentifier) }
+        return SCContentFilter(display: display, excludingApplications: excluded, exceptingWindows: keptWindows)
     }
 
     // M8 experiment: shows which apps own on-screen windows, to confirm who draws notifications.

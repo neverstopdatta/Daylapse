@@ -38,14 +38,14 @@ final class CaptureEngine {
             reason: "Daylapse screenshot timer"
         )
         DaylapseLog.write("Capture started")
-        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
         // Common modes keep the timer firing while the status menu is open.
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
         if pauseReason() == nil {
-            performCapture()
+            if settings.settings.captureOnStart { performCapture() }
             nextCapture = Date().addingTimeInterval(TimeInterval(max(1, settings.settings.intervalSeconds)))
         }
         tick()
@@ -100,7 +100,9 @@ final class CaptureEngine {
         scheduledInterval = interval
         if let nextCapture, Date() >= nextCapture, !captureInFlight {
             performCapture()
-            self.nextCapture = Date().addingTimeInterval(TimeInterval(max(1, settings.settings.intervalSeconds)))
+            // Step from the scheduled time, not from now, so ticks and capture time do not stretch the interval.
+            let stepped = nextCapture.addingTimeInterval(interval)
+            self.nextCapture = stepped > Date() ? stepped : Date().addingTimeInterval(interval)
         }
         let seconds = max(0, Int(ceil((nextCapture ?? Date()).timeIntervalSinceNow)))
         setStatus("● \(seconds)s")
