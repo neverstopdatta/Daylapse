@@ -1,8 +1,10 @@
 import Foundation
+import Observation
 
-struct AppRuleEntry: Codable, Hashable {
+struct AppRuleEntry: Codable, Hashable, Identifiable {
     var bundleID: String
     var name: String
+    var id: String { bundleID }
 }
 
 struct ShortcutSettings: Codable, Equatable {
@@ -12,7 +14,7 @@ struct ShortcutSettings: Codable, Equatable {
     static let `default` = ShortcutSettings(keyCode: 1, carbonModifiers: 2560)
 }
 
-struct DaylapseSettings: Codable {
+struct DaylapseSettings: Codable, Equatable {
     var intervalSeconds: Int
     var showPointer: Bool
     var pauseWhenIdleSeconds: Int
@@ -112,6 +114,7 @@ struct DaylapseSettings: Codable {
 }
 
 @MainActor
+@Observable
 final class SettingsStore {
     static let shared = SettingsStore()
 

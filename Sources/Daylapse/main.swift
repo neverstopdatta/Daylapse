@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkey: Hotkey!
     private var toggleItem: NSMenuItem!
     private var statusLine: NSMenuItem!
+    private var settingsWindowController: SettingsWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let settings = SettingsStore.shared
@@ -34,8 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let folderItem = NSMenuItem(title: "Open Screenshots Folder", action: #selector(openScreenshotsFolder), keyEquivalent: "")
         menu.addItem(folderItem)
         menu.addItem(.separator())
-        let settingsItem = NSMenuItem(title: "Settings…", action: nil, keyEquivalent: "")
-        settingsItem.isEnabled = false
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.keyEquivalentModifierMask = [.command]
         menu.addItem(settingsItem)
         menu.addItem(NSMenuItem(title: "Quit Daylapse", action: #selector(quit), keyEquivalent: "q"))
         statusItem.menu = menu
@@ -66,6 +67,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openScreenshotsFolder() {
         NSWorkspace.shared.open(Storage.screenshotsFolder)
+    }
+
+    @MainActor @objc private func openSettings() {
+        if settingsWindowController == nil {
+            settingsWindowController = SettingsWindowController()
+        }
+        settingsWindowController?.showSettings()
     }
 
     @objc private func takeScreenshot() {
