@@ -4,16 +4,24 @@ import Foundation
 final class CaptureEngine {
     private let settings: SettingsStore
     private let capture: () async -> Void
+    private let pauseReason: () -> AppRules.Pause?
     private let render: (String) -> Void
     private var timer: Timer?
     private var nextCapture: Date?
     private var captureInFlight = false
     private var activity: NSObjectProtocol?
+    private var lastStatus = ""
     private(set) var isStarted = false
 
-    init(settings: SettingsStore, capture: @escaping () async -> Void, render: @escaping (String) -> Void) {
+    init(
+        settings: SettingsStore,
+        capture: @escaping () async -> Void,
+        pauseReason: @escaping () -> AppRules.Pause?,
+        render: @escaping (String) -> Void
+    ) {
         self.settings = settings
         self.capture = capture
+        self.pauseReason = pauseReason
         self.render = render
     }
 
@@ -24,12 +32,14 @@ final class CaptureEngine {
             options: [.userInitiatedAllowingIdleSystemSleep],
             reason: "Daylapse screenshot timer"
         )
-        nextCapture = Date().addingTimeInterval(TimeInterval(max(1, settings.settings.intervalSeconds)))
         DaylapseLog.write("Capture started")
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
-        performCapture()
+        if pauseReason() == nil {
+            performCapture()
+            nextCapture = Date().addingTimeInterval(TimeInterval(max(1, settings.settings.intervalSeconds)))
+        }
         tick()
     }
 
@@ -44,7 +54,7 @@ final class CaptureEngine {
             self.activity = nil
         }
         DaylapseLog.write("Capture stopped")
-        render("○")
+        setStatus("○")
     }
 
     func toggle() {
@@ -56,6 +66,11 @@ final class CaptureEngine {
             render("○")
             return
         }
+        if let reason = pauseReason() {
+            nextCapture = nil
+            setStatus(reason.statusText)
+            return
+        }
         if nextCapture == nil {
             nextCapture = Date().addingTimeInterval(TimeInterval(max(1, settings.settings.intervalSeconds)))
         }
@@ -64,7 +79,7 @@ final class CaptureEngine {
             self.nextCapture = Date().addingTimeInterval(TimeInterval(max(1, settings.settings.intervalSeconds)))
         }
         let seconds = max(0, Int(ceil((nextCapture ?? Date()).timeIntervalSinceNow)))
-        render("● \(seconds)s")
+        setStatus("● \(seconds)s")
     }
 
     private func performCapture() {
@@ -75,5 +90,12 @@ final class CaptureEngine {
             await capture()
             captureInFlight = false
         }
+    }
+
+    private func setStatus(_ status: String) {
+        guard lastStatus != status else { return }
+        lastStatus = status
+        DaylapseLog.write("Status changed: \(status)")
+        render(status)
     }
 }

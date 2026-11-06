@@ -3,7 +3,7 @@ import ImageIO
 import ScreenCaptureKit
 
 enum Screenshotter {
-    static func captureAllDisplays() async throws {
+    static func captureAllDisplays(appRules: AppRules) async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard !content.displays.isEmpty else {
             DaylapseLog.write("Screenshot skipped: no displays available")
@@ -11,9 +11,13 @@ enum Screenshotter {
         }
 
         let date = Date()
+        let settingsSnapshot = await MainActor.run { SettingsStore.shared.settings }
         for display in content.displays {
             do {
-                let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+                guard let filter = await appRules.makeFilter(display: display, content: content, settings: settingsSnapshot) else {
+                    DaylapseLog.write("Display \(display.displayID) screenshot skipped: app filter could not be applied")
+                    continue
+                }
                 let configuration = SCStreamConfiguration()
                 // SCDisplay dimensions are points; this produces half-size Retina output.
                 configuration.width = Int(display.width)
@@ -24,7 +28,13 @@ enum Screenshotter {
                     contentFilter: filter,
                     configuration: configuration
                 )
-                try writeJPEG(image, displayID: display.displayID, date: date)
+                guard await appRules.frontmostStillAllowsCapture(settings: settingsSnapshot) else {
+                    DaylapseLog.write("Display \(display.displayID) screenshot discarded: app rule changed during capture")
+                    continue
+                }
+                try await Task.detached(priority: .utility) {
+                    try writeJPEG(image, displayID: display.displayID, date: date)
+                }.value
             } catch {
                 DaylapseLog.write("Display \(display.displayID) screenshot skipped: \(error.localizedDescription)")
             }

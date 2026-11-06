@@ -2,7 +2,7 @@ import AppKit
 import CoreGraphics
 
 // The app stays in the menu bar and has no Dock icon.
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var didRequestScreenCaptureAccess = false
     private var captureEngine: CaptureEngine!
@@ -10,9 +10,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var toggleItem: NSMenuItem!
     private var statusLine: NSMenuItem!
     private var settingsWindowController: SettingsWindowController?
+    private var appRules: AppRules!
+    private var blockItem: NSMenuItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let settings = SettingsStore.shared
+        appRules = AppRules(settings: settings)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.title = "○"
         statusItem.button?.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
@@ -25,8 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusLine.isEnabled = false
         menu.addItem(statusLine)
         menu.addItem(.separator())
-        let blockItem = NSMenuItem(title: "Block Frontmost App", action: nil, keyEquivalent: "")
-        blockItem.isEnabled = false
+        blockItem = NSMenuItem(title: "Block Frontmost App", action: #selector(toggleFrontmostRule), keyEquivalent: "")
         menu.addItem(blockItem)
         menu.addItem(.separator())
         let exportItem = NSMenuItem(title: "Export Today as Video", action: nil, keyEquivalent: "")
@@ -39,14 +41,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsItem.keyEquivalentModifierMask = [.command]
         menu.addItem(settingsItem)
         menu.addItem(NSMenuItem(title: "Quit Daylapse", action: #selector(quit), keyEquivalent: "q"))
+        menu.delegate = self
         statusItem.menu = menu
 
         captureEngine = CaptureEngine(settings: settings, capture: {
             do {
-                try await Screenshotter.captureAllDisplays()
+                try await Screenshotter.captureAllDisplays(appRules: self.appRules)
             } catch {
                 DaylapseLog.write("Screenshot failed: \(error.localizedDescription)")
             }
+        }, pauseReason: { [weak self] in
+            self?.appRules.pauseReason() ?? .notAllowed
         }, render: { [weak self] text in
             self?.statusLine.title = text
             self?.statusItem.button?.title = text
@@ -76,6 +81,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindowController?.showSettings()
     }
 
+    @MainActor @objc private func toggleFrontmostRule() {
+        do {
+            try appRules.toggleCurrentRule()
+            updateBlockMenuItem()
+        } catch {
+            DaylapseLog.write("Could not update app rule: \(error.localizedDescription)")
+        }
+    }
+
+    @MainActor func menuWillOpen(_ menu: NSMenu) {
+        updateBlockMenuItem()
+    }
+
+    @MainActor private func updateBlockMenuItem() {
+        if let title = appRules.menuTitle() {
+            blockItem.title = title
+            blockItem.isEnabled = true
+        } else {
+            blockItem.title = "Block Frontmost App"
+            blockItem.isEnabled = false
+        }
+    }
+
     @objc private func takeScreenshot() {
         guard CGPreflightScreenCaptureAccess() else {
             if !didRequestScreenCaptureAccess {
@@ -91,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        Task { try? await Screenshotter.captureAllDisplays() }
+        Task { try? await Screenshotter.captureAllDisplays(appRules: appRules) }
     }
 
     @objc private func quit() {
