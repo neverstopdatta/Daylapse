@@ -11,11 +11,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusLine: NSMenuItem!
     private var settingsWindowController: SettingsWindowController?
     private var appRules: AppRules!
+    private var systemState: SystemState!
     private var blockItem: NSMenuItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let settings = SettingsStore.shared
         appRules = AppRules(settings: settings)
+        systemState = SystemState(settings: settings)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = "○"
         statusItem.button?.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
@@ -52,7 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }, pauseReason: { [weak self] in
             guard let self else { return .notAllowed }
-            return self.appRules.pauseReason()
+            return self.systemState.pauseReason() ?? self.appRules.pauseReason()
         }, render: { [weak self] text in
             self?.renderStatus(text)
         })

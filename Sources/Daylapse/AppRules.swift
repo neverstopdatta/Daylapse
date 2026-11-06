@@ -9,11 +9,15 @@ final class AppRules {
     }
 
     enum Pause: Equatable {
-        case notAllowed
+        case notAllowed, locked, asleep, lowDisk, idle
 
         var statusText: String {
             switch self {
             case .notAllowed: "🚫 Not allowed"
+            case .locked: "⏸ Locked"
+            case .asleep: "⏸ Asleep"
+            case .lowDisk: "⏸ Low disk"
+            case .idle: "⏸ Idle"
             }
         }
     }
