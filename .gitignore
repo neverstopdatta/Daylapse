@@ -3,3 +3,7 @@ build/
 .DS_Store
 *.png
 .claude/
+*.p12
+*.pem
+*.key
+.env
