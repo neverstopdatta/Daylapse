@@ -40,6 +40,7 @@ struct CaptureTab: View {
         Form {
             Section {
                 DurationField(title: "Interval", seconds: $settings.intervalSeconds, range: 1...3600, zeroMeansOff: false)
+                Toggle("Resume countdown after stopping", isOn: $settings.resumeCountdown)
                 Toggle("Capture immediately on start", isOn: $settings.captureOnStart)
                 Toggle("Show pointer", isOn: $settings.showPointer)
             }
@@ -80,6 +81,13 @@ struct StorageTab: View {
             }
             LabeledContent("Used", value: ByteCountFormatter.string(fromByteCount: usedBytes, countStyle: .file))
             Button("Delete All…", role: .destructive, action: deleteAll)
+            }
+            Section {
+            Picker("New day starts at", selection: $settings.dayStartHour) {
+                ForEach(0...8, id: \.self) { Text(String(format: "%02d:00", $0)).tag($0) }
+            }
+            Text("Screenshots taken before this time are filed under the previous day, so a session that runs past midnight stays in one folder.")
+                .font(.caption).foregroundStyle(.secondary)
             }
             Section {
             Picker("Delete older than", selection: $settings.deleteAfterDays) {
@@ -152,33 +160,28 @@ struct DurationField: View {
     @State private var keyMonitor: Any?
 
     var body: some View {
-        VStack(spacing: 4) {
-            LabeledContent(title) {
-                HStack(spacing: 6) {
-                    TextField("", text: $text)
-                        .textFieldStyle(.roundedBorder)
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 70)
-                        .focused($focused)
-                        .onSubmit(commit)
-                    VStack(spacing: 0) {
-                        RepeatButton(systemImage: "chevron.up") { step(1) }
-                        RepeatButton(systemImage: "chevron.down") { step(-1) }
-                    }
-                    Picker("", selection: $unit) {
-                        ForEach(Unit.allCases, id: \.self) { Text($0.label).tag($0) }
-                    }
-                    .labelsHidden()
-                    .frame(width: 100)
-                }
+        HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                if let note { Text(note).font(.caption).foregroundStyle(.secondary) }
             }
-            HStack {
-                if let note { Text(note) }
-                Spacer()
-                Text(caption)
+            Spacer()
+            Text(caption).font(.caption).foregroundStyle(.secondary)
+            TextField("", text: $text)
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 70)
+                .focused($focused)
+                .onSubmit(commit)
+            VStack(spacing: 0) {
+                RepeatButton(systemImage: "chevron.up") { step(1) }
+                RepeatButton(systemImage: "chevron.down") { step(-1) }
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            Picker("", selection: $unit) {
+                ForEach(Unit.allCases, id: \.self) { Text($0.label).tag($0) }
+            }
+            .labelsHidden()
+            .frame(width: 100)
         }
         .onAppear(perform: load)
         .onChange(of: focused) { _, isFocused in
@@ -246,7 +249,7 @@ struct DurationField: View {
 }
 
 // Steps once on press, then repeats at the system key-repeat delay and rate while held.
-private struct RepeatButton: View {
+struct RepeatButton: View {
     let systemImage: String
     let action: () -> Void
     @State private var timer: Timer?
@@ -285,5 +288,69 @@ private struct RepeatButton: View {
         pressed = false
         timer?.invalidate()
         timer = nil
+    }
+}
+
+// A whole-number field with up/down buttons and arrow-key stepping, clamped to a range.
+struct IntField: View {
+    let title: String
+    @Binding var value: Int
+    let range: ClosedRange<Int>
+    let unit: String
+    // Shown left of the field; the allowed range when nil.
+    var caption: String?
+    @State private var text = ""
+    @FocusState private var focused: Bool
+    @State private var keyMonitor: Any?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(title)
+            Spacer()
+            Text(caption ?? "\(range.lowerBound)–\(range.upperBound)").font(.caption).foregroundStyle(.secondary)
+            TextField("", text: $text)
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 70)
+                .focused($focused)
+                .onSubmit(commit)
+            VStack(spacing: 0) {
+                RepeatButton(systemImage: "chevron.up") { step(1) }
+                RepeatButton(systemImage: "chevron.down") { step(-1) }
+            }
+            Text(unit).frame(width: 30, alignment: .leading)
+        }
+        .onAppear { text = String(value) }
+        .onChange(of: focused) { _, isFocused in
+            if isFocused { startKeyMonitor() } else { stopKeyMonitor(); commit() }
+        }
+        .onChange(of: value) { _, _ in if !focused { text = String(value) } }
+        .onDisappear(perform: stopKeyMonitor)
+    }
+
+    private func commit() {
+        if let typed = Int(text) { value = min(max(typed, range.lowerBound), range.upperBound) }
+        text = String(value)
+    }
+
+    private func step(_ direction: Int) {
+        commit()
+        value = min(max(value + direction, range.lowerBound), range.upperBound)
+        text = String(value)
+    }
+
+    // A key monitor sees auto-repeat events, which the text field's own handling swallows.
+    private func startKeyMonitor() {
+        stopKeyMonitor()
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.keyCode == 126 || event.keyCode == 125 else { return event }
+            step(event.keyCode == 126 ? 1 : -1)
+            return nil
+        }
+    }
+
+    private func stopKeyMonitor() {
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = nil
     }
 }

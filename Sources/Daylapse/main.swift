@@ -16,12 +16,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var blockItem: NSMenuItem!
     private var exportItem: NSMenuItem!
 
+    private lazy var menuBarImage: NSImage? = Self.menuBarIcon()
+
+    private static func menuBarIcon() -> NSImage? {
+        guard let url = Bundle.main.url(forResource: "MenuBarIcon@2x", withExtension: "png"),
+              let image = NSImage(contentsOf: url) else { return nil }
+        image.size = NSSize(width: 18, height: 18)
+        image.isTemplate = true
+        return image
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Storage.migrateLegacyPaths()
         let settings = SettingsStore.shared
         appRules = AppRules(settings: settings)
         systemState = SystemState(settings: settings)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "○"
+        statusItem.button?.image = menuBarImage
+        statusItem.button?.title = ""
         statusItem.button?.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
 
         let menu = NSMenu()
@@ -43,7 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.keyEquivalentModifierMask = [.command]
         menu.addItem(settingsItem)
-        menu.addItem(NSMenuItem(title: "Quit Daylapse", action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
         menu.delegate = self
         statusItem.menu = menu
 
@@ -105,14 +117,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @MainActor private func renderStatus(_ text: String) {
         statusLine.title = text
-        statusItem.button?.title = text == AppRules.Pause.notAllowed.statusText ? "🚫" : text
+        // One thing shows at a time: the app icon when idle, a symbol when paused or blocked, else the countdown.
+        let button = statusItem.button
+        button?.title = ""
+        if text == "○" {
+            button?.image = menuBarImage
+        } else if text == AppRules.Pause.notAllowed.statusText {
+            button?.image = Self.symbol("nosign")
+        } else if text.hasPrefix("⏸") {
+            button?.image = Self.symbol("pause.fill")
+        } else {
+            button?.image = nil
+            button?.title = text.hasPrefix("● ") ? String(text.dropFirst(2)) : text
+        }
+    }
+
+    private static func symbol(_ name: String) -> NSImage? {
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 15, weight: .regular))
+        image?.isTemplate = true
+        return image
     }
 
     @MainActor @objc private func exportToday() {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        let day = formatter.string(from: Date())
+        let day = Storage.dayName(for: Date())
         exportItem.title = "Exporting…"
         exportItem.isEnabled = false
         let fps = SettingsStore.shared.settings.exportFPS
@@ -197,7 +225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             let alert = NSAlert()
             alert.messageText = "Screen Recording permission required"
-            alert.informativeText = "Grant Daylapse access in Privacy & Security → Screen Recording, then quit and relaunch Daylapse before taking a screenshot."
+            alert.informativeText = "Grant Screenshots Timelapse access in Privacy & Security → Screen Recording, then quit and relaunch Screenshots Timelapse before taking a screenshot."
             alert.alertStyle = .informational
             alert.addButton(withTitle: "OK")
             alert.runModal()

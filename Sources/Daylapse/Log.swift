@@ -3,7 +3,7 @@ import Foundation
 enum DaylapseLog {
     private static let lock = NSLock()
     private static let logURL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Logs/Daylapse.log")
+        .appendingPathComponent("Library/Logs/Screenshots Timelapse.log")
 
     static func write(_ message: String) {
         lock.lock()

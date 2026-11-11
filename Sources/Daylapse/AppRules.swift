@@ -13,7 +13,7 @@ final class AppRules {
 
         var statusText: String {
             switch self {
-            case .notAllowed: "🚫 Not allowed"
+            case .notAllowed: "⊘ Not allowed"
             case .locked: "⏸ Locked"
             case .asleep: "⏸ Asleep"
             case .lowDisk: "⏸ Low disk"

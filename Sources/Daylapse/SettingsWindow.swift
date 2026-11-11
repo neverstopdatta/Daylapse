@@ -13,7 +13,7 @@ final class SettingsWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Daylapse Settings"
+        window.title = "SSTL Settings"
         window.center()
         window.contentView = NSHostingView(rootView: SettingsWindowView())
         self.init(window: window)
@@ -193,27 +193,78 @@ private struct TimelapseTab: View {
     @State private var days: [Exporter.Day] = []
     @State private var selected: Set<String> = []
     @State private var exporting = false
+    @State private var merge = false
+    @State private var showSessionNote = false
+    @AppStorage("exportNewestFirst") private var newestFirst = true
+    @State private var ffmpeg: (url: URL, custom: Bool)?
+    @State private var ffmpegVersion: String?
+    @State private var ffmpegProblem: String?
+    @State private var misfiled: [(url: URL, day: String)] = []
+
+    private let sessionNote = "These days aren't consecutive.\nCheck they're from the same session."
+    private var mergeActive: Bool { merge && selected.count > 1 }
+    private var shownDays: [Exporter.Day] { newestFirst ? days : days.reversed() }
 
     var body: some View {
         Form {
-            Section {
-                Picker("Speed", selection: $settings.exportFPS) {
-                    ForEach([8, 12, 24, 30], id: \.self) { Text("\($0) fps").tag($0) }
+            if ffmpeg == nil { ffmpegSection }
+            if !misfiled.isEmpty {
+                Section {
+                    warning("\(misfiled.count) screenshots are filed under a different day than \"New day starts at\" (Storage tab) expects.")
+                    HStack {
+                        Spacer()
+                        Button("Move them to the right day", action: fixMisfiled)
+                    }
+                    .listRowBackground(Color.yellow.opacity(0.18))
                 }
+            }
+            Section {
+                IntField(title: "Speed", value: $settings.exportFPS, range: 1...60, unit: "fps", caption: lengthText)
                 HStack {
                     Text(selected.isEmpty ? "Select the days to export." : "\(selected.count) selected")
                         .foregroundStyle(.secondary)
                     Spacer()
                     Button("Refresh") { reload() }
                     Button(exporting ? "Exporting…" : "Export") { export() }
-                        .disabled(exporting || selected.isEmpty)
+                        .disabled(exporting || selected.isEmpty || ffmpeg == nil)
+                }
+                HStack(spacing: 6) {
+                    Toggle("Combine selected days into one video", isOn: $merge)
+                        .toggleStyle(.checkbox)
+                        .disabled(selected.count < 2)
+                    Spacer()
+                    // Fixed-size slot so the notice appears without moving anything.
+                    Button { showSessionNote.toggle() } label: {
+                        Image(systemName: "exclamationmark.circle").foregroundStyle(.orange)
+                    }
+                    .buttonStyle(.plain)
+                    .help(sessionNote)
+                    .popover(isPresented: $showSessionNote, arrowEdge: .bottom) {
+                        Text(sessionNote).fixedSize().padding(10)
+                    }
+                    .opacity(merge && selected.count > 1 && !consecutive ? 1 : 0)
+                    .disabled(!(merge && selected.count > 1 && !consecutive))
                 }
             }
             Section("Days") {
+                HStack {
+                    Toggle("Select all", isOn: Binding(
+                        get: { !days.isEmpty && selected.count == days.count },
+                        set: { selected = $0 ? Set(days.map(\.name)) : [] }
+                    ))
+                    .toggleStyle(.checkbox)
+                    .disabled(days.isEmpty)
+                    Spacer()
+                    Picker("Order", selection: $newestFirst) {
+                        Text("Newest first").tag(true)
+                        Text("Oldest first").tag(false)
+                    }
+                    .labelsHidden().fixedSize()
+                }
                 if days.isEmpty {
                     Text("No days captured yet").foregroundStyle(.secondary)
                 }
-                ForEach(days) { day in
+                ForEach(shownDays) { day in
                     Toggle(isOn: Binding(
                         get: { selected.contains(day.name) },
                         set: { if $0 { selected.insert(day.name) } else { selected.remove(day.name) } }
@@ -227,24 +278,139 @@ private struct TimelapseTab: View {
                     .toggleStyle(.checkbox)
                 }
             }
+            if ffmpeg != nil { ffmpegSection }
         }
         .formStyle(.grouped)
-        .onAppear(perform: reload)
+        .onAppear {
+            reload()
+            refreshFFmpeg()
+        }
+    }
+
+    private func warning(_ text: String) -> some View {
+        Label {
+            Text(text)
+        } icon: {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+        }
+    }
+
+    @ViewBuilder private var ffmpegSection: some View {
+        let missing = ffmpeg == nil
+        Section("ffmpeg") {
+            if missing {
+                warning("ffmpeg is required to export videos and was not found.")
+                    .listRowBackground(Color.yellow.opacity(0.18))
+                Text("Install it, for example with Homebrew (brew install ffmpeg) or MacPorts (sudo port install ffmpeg), or choose an existing copy.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .listRowBackground(Color.yellow.opacity(0.18))
+            } else if let ffmpeg {
+                LabeledContent(ffmpeg.custom ? "Chosen" : "Auto-detected") {
+                    Text(ffmpeg.url.path).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                }
+                if let ffmpegVersion {
+                    LabeledContent("Version", value: ffmpegVersion)
+                }
+            }
+            if let ffmpegProblem {
+                warning(ffmpegProblem).listRowBackground(Color.yellow.opacity(0.18))
+            }
+            HStack {
+                if missing {
+                    Button("Copy Homebrew command") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString("brew install ffmpeg", forType: .string)
+                    }
+                }
+                Button("Choose…", action: chooseFFmpeg)
+                if !settings.ffmpegPath.isEmpty {
+                    Button("Use auto-detect") {
+                        settings.ffmpegPath = ""
+                        Exporter.customFFmpegPath = ""
+                        ffmpegProblem = nil
+                        refreshFFmpeg()
+                    }
+                }
+                Button("Check again", action: refreshFFmpeg)
+            }
+            .listRowBackground(missing ? Color.yellow.opacity(0.18) : nil)
+        }
+    }
+
+    private func refreshFFmpeg() {
+        let found = Exporter.ffmpegLocation()
+        ffmpeg = found
+        ffmpegVersion = found.flatMap { Exporter.ffmpegVersion(at: $0.url.path) }
+        if found != nil, ffmpegVersion == nil {
+            ffmpegProblem = "That file did not report an ffmpeg version, so exports may fail."
+        }
+    }
+
+    private func chooseFFmpeg() {
+        let panel = NSOpenPanel()
+        panel.message = "Choose the ffmpeg executable"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: "/opt/homebrew/bin")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard Exporter.ffmpegVersion(at: url.path) != nil else {
+            ffmpegProblem = "\(url.lastPathComponent) is not ffmpeg (it did not report a version), so it was not used."
+            return
+        }
+        ffmpegProblem = nil
+        settings.ffmpegPath = url.path
+        // The setting reaches Exporter on save, so apply it directly for the immediate re-check.
+        Exporter.customFFmpegPath = url.path
+        refreshFFmpeg()
+    }
+
+    private var consecutive: Bool {
+        let dates = selected.sorted().compactMap(Storage.dayDate)
+        let calendar = Calendar.current
+        return zip(dates, dates.dropFirst()).allSatisfy { calendar.dateComponents([.day], from: $0, to: $1).day == 1 }
+    }
+
+    // Separate videos add up to the total; combined days make a single video.
+    private var lengthText: String {
+        let frames = days.filter { selected.contains($0.name) }.map(\.videoFrames).reduce(0, +)
+        guard frames > 0 else { return "Select days to see the length" }
+        let seconds = Int((Double(frames) / Double(settings.exportFPS)).rounded(.up))
+        return "\(DurationField.describe(seconds))\(selected.count > 1 && !mergeActive ? " in total" : "")"
     }
 
     private func reload() {
         days = Exporter.days(in: Storage.screenshotsFolder)
         selected = selected.filter { name in days.contains { $0.name == name } }
+        let folder = Storage.screenshotsFolder
+        DispatchQueue.global().async {
+            let found = Storage.misfiled(in: folder)
+            DispatchQueue.main.async { misfiled = found }
+        }
+    }
+
+    private func fixMisfiled() {
+        let folder = Storage.screenshotsFolder
+        let items = misfiled
+        DispatchQueue.global().async {
+            Storage.refile(items, in: folder)
+            DispatchQueue.main.async { reload() }
+        }
     }
 
     private func export() {
         exporting = true
         let chosen = selected.sorted()
         let fps = settings.exportFPS
+        let combine = mergeActive
         DispatchQueue.global().async {
             var results: [Result<[URL], Error>] = []
-            for day in chosen {
-                results.append(Result { try Exporter.export(day: day, fps: fps, in: Storage.screenshotsFolder) })
+            if combine {
+                results.append(Result { try Exporter.export(days: chosen, fps: fps, in: Storage.screenshotsFolder) })
+            } else {
+                for day in chosen {
+                    results.append(Result { try Exporter.export(day: day, fps: fps, in: Storage.screenshotsFolder) })
+                }
             }
             DispatchQueue.main.async {
                 exporting = false

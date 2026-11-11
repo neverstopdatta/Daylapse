@@ -19,6 +19,7 @@ struct DaylapseSettings: Codable, Equatable {
     static let notificationBundleID = "com.apple.notificationcenterui"
 
     var intervalSeconds: Int
+    var resumeCountdown: Bool
     var captureOnStart: Bool
     var showPointer: Bool
     var pauseWhenIdleSeconds: Int
@@ -39,44 +40,50 @@ struct DaylapseSettings: Codable, Equatable {
     var deletePermanently: Bool
     var minFreeSpaceGB: Int
     var exportFPS: Int
+    var ffmpegPath: String
+    var dayStartHour: Int
     var shortcut: ShortcutSettings
 
     static let defaults = DaylapseSettings(
         intervalSeconds: 30,
+        resumeCountdown: false,
         captureOnStart: true,
         showPointer: false,
         pauseWhenIdleSeconds: 60,
         pauseWhenLocked: true,
         pauseWhenMenuOpen: false,
         displays: "all",
-        halfSizeOnRetina: true,
-        jpegQuality: 0.7,
+        halfSizeOnRetina: false,
+        jpegQuality: 0.8,
         appMode: "block",
         blockedApps: [],
         allowedApps: [],
         showNotifications: false,
-        showDesktopIcons: true,
+        showDesktopIcons: false,
         showWallpaper: true,
         backgroundHex: "#000000",
-        folderPath: "~/Pictures/Daylapse",
+        folderPath: Storage.defaultFolderPath,
         deleteAfterDays: 0,
         deletePermanently: false,
         minFreeSpaceGB: 5,
         exportFPS: 12,
+        ffmpegPath: "",
+        dayStartHour: 0,
         shortcut: .default
     )
 
     private enum CodingKeys: String, CodingKey {
-        case intervalSeconds, captureOnStart, showPointer, pauseWhenIdleSeconds, pauseWhenLocked, pauseWhenMenuOpen, displays
+        case intervalSeconds, resumeCountdown, captureOnStart, showPointer, pauseWhenIdleSeconds, pauseWhenLocked, pauseWhenMenuOpen, displays
         case halfSizeOnRetina, jpegQuality, appMode, blockedApps, allowedApps
         case showNotifications, showDesktopIcons, showWallpaper, backgroundHex, hideNotifications, hideDesktopIcons
         case folderPath, deleteAfterDays
-        case deletePermanently, minFreeSpaceGB, exportFPS, shortcut
+        case deletePermanently, minFreeSpaceGB, exportFPS, ffmpegPath, dayStartHour, shortcut
     }
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(intervalSeconds, forKey: .intervalSeconds)
+        try c.encode(resumeCountdown, forKey: .resumeCountdown)
         try c.encode(captureOnStart, forKey: .captureOnStart)
         try c.encode(showPointer, forKey: .showPointer)
         try c.encode(pauseWhenIdleSeconds, forKey: .pauseWhenIdleSeconds)
@@ -97,6 +104,8 @@ struct DaylapseSettings: Codable, Equatable {
         try c.encode(deletePermanently, forKey: .deletePermanently)
         try c.encode(minFreeSpaceGB, forKey: .minFreeSpaceGB)
         try c.encode(exportFPS, forKey: .exportFPS)
+        try c.encode(ffmpegPath, forKey: .ffmpegPath)
+        try c.encode(dayStartHour, forKey: .dayStartHour)
         try c.encode(shortcut, forKey: .shortcut)
     }
 
@@ -104,6 +113,7 @@ struct DaylapseSettings: Codable, Equatable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = Self.defaults
         intervalSeconds = try values.decodeIfPresent(Int.self, forKey: .intervalSeconds) ?? defaults.intervalSeconds
+        resumeCountdown = try values.decodeIfPresent(Bool.self, forKey: .resumeCountdown) ?? defaults.resumeCountdown
         captureOnStart = try values.decodeIfPresent(Bool.self, forKey: .captureOnStart) ?? defaults.captureOnStart
         showPointer = try values.decodeIfPresent(Bool.self, forKey: .showPointer) ?? defaults.showPointer
         pauseWhenIdleSeconds = try values.decodeIfPresent(Int.self, forKey: .pauseWhenIdleSeconds) ?? defaults.pauseWhenIdleSeconds
@@ -129,17 +139,20 @@ struct DaylapseSettings: Codable, Equatable {
         deletePermanently = try values.decodeIfPresent(Bool.self, forKey: .deletePermanently) ?? defaults.deletePermanently
         minFreeSpaceGB = try values.decodeIfPresent(Int.self, forKey: .minFreeSpaceGB) ?? defaults.minFreeSpaceGB
         exportFPS = try values.decodeIfPresent(Int.self, forKey: .exportFPS) ?? defaults.exportFPS
+        ffmpegPath = try values.decodeIfPresent(String.self, forKey: .ffmpegPath) ?? defaults.ffmpegPath
+        dayStartHour = try values.decodeIfPresent(Int.self, forKey: .dayStartHour) ?? defaults.dayStartHour
         shortcut = try values.decodeIfPresent(ShortcutSettings.self, forKey: .shortcut) ?? defaults.shortcut
     }
 
     init(
-        intervalSeconds: Int, captureOnStart: Bool, showPointer: Bool, pauseWhenIdleSeconds: Int, pauseWhenLocked: Bool,
+        intervalSeconds: Int, resumeCountdown: Bool, captureOnStart: Bool, showPointer: Bool, pauseWhenIdleSeconds: Int, pauseWhenLocked: Bool,
         pauseWhenMenuOpen: Bool, displays: String, halfSizeOnRetina: Bool, jpegQuality: Double, appMode: String,
         blockedApps: [AppRuleEntry], allowedApps: [AppRuleEntry], showNotifications: Bool,
         showDesktopIcons: Bool, showWallpaper: Bool, backgroundHex: String, folderPath: String, deleteAfterDays: Int, deletePermanently: Bool,
-        minFreeSpaceGB: Int, exportFPS: Int, shortcut: ShortcutSettings
+        minFreeSpaceGB: Int, exportFPS: Int, ffmpegPath: String, dayStartHour: Int, shortcut: ShortcutSettings
     ) {
         self.intervalSeconds = intervalSeconds
+        self.resumeCountdown = resumeCountdown
         self.captureOnStart = captureOnStart
         self.showPointer = showPointer
         self.pauseWhenIdleSeconds = pauseWhenIdleSeconds
@@ -160,6 +173,8 @@ struct DaylapseSettings: Codable, Equatable {
         self.deletePermanently = deletePermanently
         self.minFreeSpaceGB = minFreeSpaceGB
         self.exportFPS = exportFPS
+        self.ffmpegPath = ffmpegPath
+        self.dayStartHour = dayStartHour
         self.shortcut = shortcut
     }
 }
@@ -174,11 +189,12 @@ final class SettingsStore {
 
     private init() {
         let support = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Daylapse", isDirectory: true)
+            .appendingPathComponent("Library/Application Support/Screenshots Timelapse", isDirectory: true)
         fileURL = support.appendingPathComponent("settings.json")
 
         if let data = try? Data(contentsOf: fileURL), let decoded = try? JSONDecoder().decode(DaylapseSettings.self, from: data) {
             settings = decoded
+            if settings.folderPath == "~/Pictures/Daylapse" { settings.folderPath = Storage.defaultFolderPath }
         } else {
             settings = .defaults
             if FileManager.default.fileExists(atPath: fileURL.path) {
@@ -194,10 +210,14 @@ final class SettingsStore {
             }
         }
         Storage.folderPath = settings.folderPath
+        Exporter.customFFmpegPath = settings.ffmpegPath
+        Storage.dayStartHour = settings.dayStartHour
     }
 
     func save(_ newSettings: DaylapseSettings) throws {
         Storage.folderPath = newSettings.folderPath
+        Exporter.customFFmpegPath = newSettings.ffmpegPath
+        Storage.dayStartHour = newSettings.dayStartHour
         let directory = fileURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(newSettings)

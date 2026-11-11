@@ -9,6 +9,8 @@ final class CaptureEngine {
     private var timer: Timer?
     private var nextCapture: Date?
     private var pausedRemaining: TimeInterval?
+    // Time left on the countdown when stopped, so the next start resumes instead of restarting.
+    private var resumeRemaining: TimeInterval?
     private var scheduledInterval: TimeInterval?
     private var pendingStartCapture = false
     private var captureInFlight = false
@@ -40,7 +42,7 @@ final class CaptureEngine {
         isStarted = true
         activity = ProcessInfo.processInfo.beginActivity(
             options: [.userInitiatedAllowingIdleSystemSleep],
-            reason: "Daylapse screenshot timer"
+            reason: "Screenshots Timelapse screenshot timer"
         )
         DaylapseLog.write("Capture started")
         let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
@@ -50,18 +52,29 @@ final class CaptureEngine {
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
         if pauseReason() == nil {
-            if settings.settings.captureOnStart {
-                // A held countdown wins: the first shot waits until the menu or Settings is dismissed.
-                if isHeldByMenu { pendingStartCapture = true } else { performCapture() }
+            let interval = TimeInterval(max(1, settings.settings.intervalSeconds))
+            if let resume = resumeRemaining {
+                nextCapture = Date().addingTimeInterval(min(resume, interval))
+            } else {
+                if settings.settings.captureOnStart {
+                    // A held countdown wins: the first shot waits until the menu or Settings is dismissed.
+                    if isHeldByMenu { pendingStartCapture = true } else { performCapture() }
+                }
+                nextCapture = Date().addingTimeInterval(interval)
             }
-            nextCapture = Date().addingTimeInterval(TimeInterval(max(1, settings.settings.intervalSeconds)))
+        } else if let resume = resumeRemaining {
+            pausedRemaining = resume
         }
+        resumeRemaining = nil
         tick()
     }
 
     func stop() {
         guard isStarted else { return }
         isStarted = false
+        resumeRemaining = settings.settings.resumeCountdown
+            ? pausedRemaining ?? nextCapture.map { max(1, $0.timeIntervalSinceNow) }
+            : nil
         timer?.invalidate()
         timer = nil
         nextCapture = nil
@@ -93,7 +106,7 @@ final class CaptureEngine {
         if isHeldByMenu {
             holdCountdown()
             let remaining = pausedRemaining ?? TimeInterval(max(1, settings.settings.intervalSeconds))
-            setStatus("⏸ \(Int(ceil(remaining)))s")
+            setStatus("⏸ \(Self.compact(remaining))")
             return
         }
         if pendingStartCapture {
@@ -118,8 +131,15 @@ final class CaptureEngine {
             let stepped = nextCapture.addingTimeInterval(interval)
             self.nextCapture = stepped > Date() ? stepped : Date().addingTimeInterval(interval)
         }
-        let seconds = max(0, Int(ceil((nextCapture ?? Date()).timeIntervalSinceNow)))
-        setStatus("● \(seconds)s")
+        setStatus("● \(Self.compact((nextCapture ?? Date()).timeIntervalSinceNow))")
+    }
+
+    // At most two digits plus a unit: 45s, 2m, 60m, 3h.
+    private static func compact(_ remaining: TimeInterval) -> String {
+        let seconds = max(0, Int(ceil(remaining)))
+        if seconds < 60 { return "\(seconds)s" }
+        if seconds <= 3600 { return "\((seconds + 59) / 60)m" }
+        return "\((seconds + 3599) / 3600)h"
     }
 
     private var isHeldByMenu: Bool {
