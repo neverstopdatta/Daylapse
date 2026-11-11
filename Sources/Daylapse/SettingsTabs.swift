@@ -72,6 +72,15 @@ struct StorageTab: View {
     var body: some View {
         Form {
             Section {
+            Picker("Project", selection: $settings.folderPath) {
+                ForEach(settings.projects) { Text($0.name).tag($0.path) }
+            }
+            TextField("Name", text: projectName)
+            HStack {
+                Button("New Project…", action: newProject)
+                Button("Remove Project…", role: .destructive, action: removeProject)
+                    .disabled(settings.projects.count < 2)
+            }
             LabeledContent("Folder") {
                 Text(settings.folderPath).lineLimit(1).truncationMode(.middle)
             }
@@ -80,13 +89,13 @@ struct StorageTab: View {
                 Button("Show in Finder") { NSWorkspace.shared.open(Storage.screenshotsFolder) }
             }
             LabeledContent("Used", value: ByteCountFormatter.string(fromByteCount: usedBytes, countStyle: .file))
-            Button("Delete All…", role: .destructive, action: deleteAll)
+            Button("Delete All in Project…", role: .destructive, action: deleteAll)
             }
             Section {
             Picker("New day starts at", selection: $settings.dayStartHour) {
                 ForEach(0...8, id: \.self) { Text(String(format: "%02d:00", $0)).tag($0) }
             }
-            Text("Screenshots taken before this time are filed under the previous day, so a session that runs past midnight stays in one folder.")
+            Text("Screenshots taken before this time are filed under the previous day.")
                 .font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -123,12 +132,36 @@ struct StorageTab: View {
         panel.allowsMultipleSelection = false
         panel.directoryURL = Storage.screenshotsFolder.deletingLastPathComponent()
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        settings.folderPath = (url.path as NSString).abbreviatingWithTildeInPath
+        if !settings.setActiveFolder((url.path as NSString).abbreviatingWithTildeInPath) {
+            ProjectPrompt.showError("Another project already uses that folder.")
+        }
+    }
+
+    private var projectName: Binding<String> {
+        Binding(
+            get: { settings.activeIndex.map { settings.projects[$0].name } ?? "" },
+            set: { if let index = settings.activeIndex { settings.projects[index].name = $0 } }
+        )
+    }
+
+    private func newProject() {
+        guard let name = ProjectPrompt.askName() else { return }
+        if let error = settings.addProject(named: name) { ProjectPrompt.showError(error) }
+    }
+
+    private func removeProject() {
+        let alert = NSAlert()
+        alert.messageText = "Remove \"\(settings.activeProjectName)\"?"
+        alert.informativeText = "The project leaves the list. Its screenshots and videos stay in the folder."
+        alert.addButton(withTitle: "Remove")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        settings.removeActiveProject()
     }
 
     private func deleteAll() {
         let alert = NSAlert()
-        alert.messageText = "Delete all screenshots?"
+        alert.messageText = "Delete all screenshots in \"\(settings.activeProjectName)\"?"
         alert.informativeText = settings.deletePermanently
             ? "All day folders will be deleted permanently. Exported videos are kept."
             : "All day folders will be moved to the Trash. Exported videos are kept."

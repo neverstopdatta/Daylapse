@@ -11,7 +11,8 @@ Screenshots Timelapse is an independent project. It is not affiliated with or en
 - Optionally show or hide the wallpaper, desktop icons and notifications
 - Pauses when the screen is locked, the Mac is idle, or disk space is low
 - Global start/stop shortcut
-- Exports a day (or each display) to an H.264 `.mp4`
+- Projects: separate screenshot folders and day lists, switched from the menu bar
+- Exports a day (or each display, or several days combined) to an H.264 `.mp4`
 - Automatic cleanup of old day folders (move to Trash or delete)
 - Runs from the menu bar only, with no Dock icon
 

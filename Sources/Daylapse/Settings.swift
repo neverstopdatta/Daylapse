@@ -36,6 +36,7 @@ struct DaylapseSettings: Codable, Equatable {
     var showWallpaper: Bool
     var backgroundHex: String
     var folderPath: String
+    var projects: [Project]
     var deleteAfterDays: Int
     var deletePermanently: Bool
     var minFreeSpaceGB: Int
@@ -63,6 +64,7 @@ struct DaylapseSettings: Codable, Equatable {
         showWallpaper: true,
         backgroundHex: "#000000",
         folderPath: Storage.defaultFolderPath,
+        projects: [],
         deleteAfterDays: 0,
         deletePermanently: false,
         minFreeSpaceGB: 5,
@@ -76,7 +78,7 @@ struct DaylapseSettings: Codable, Equatable {
         case intervalSeconds, resumeCountdown, captureOnStart, showPointer, pauseWhenIdleSeconds, pauseWhenLocked, pauseWhenMenuOpen, displays
         case halfSizeOnRetina, jpegQuality, appMode, blockedApps, allowedApps
         case showNotifications, showDesktopIcons, showWallpaper, backgroundHex, hideNotifications, hideDesktopIcons
-        case folderPath, deleteAfterDays
+        case folderPath, projects, deleteAfterDays
         case deletePermanently, minFreeSpaceGB, exportFPS, ffmpegPath, dayStartHour, shortcut
     }
 
@@ -100,6 +102,7 @@ struct DaylapseSettings: Codable, Equatable {
         try c.encode(showWallpaper, forKey: .showWallpaper)
         try c.encode(backgroundHex, forKey: .backgroundHex)
         try c.encode(folderPath, forKey: .folderPath)
+        try c.encode(projects, forKey: .projects)
         try c.encode(deleteAfterDays, forKey: .deleteAfterDays)
         try c.encode(deletePermanently, forKey: .deletePermanently)
         try c.encode(minFreeSpaceGB, forKey: .minFreeSpaceGB)
@@ -135,6 +138,7 @@ struct DaylapseSettings: Codable, Equatable {
         showWallpaper = try values.decodeIfPresent(Bool.self, forKey: .showWallpaper) ?? defaults.showWallpaper
         backgroundHex = try values.decodeIfPresent(String.self, forKey: .backgroundHex) ?? defaults.backgroundHex
         folderPath = try values.decodeIfPresent(String.self, forKey: .folderPath) ?? defaults.folderPath
+        projects = try values.decodeIfPresent([Project].self, forKey: .projects) ?? defaults.projects
         deleteAfterDays = try values.decodeIfPresent(Int.self, forKey: .deleteAfterDays) ?? defaults.deleteAfterDays
         deletePermanently = try values.decodeIfPresent(Bool.self, forKey: .deletePermanently) ?? defaults.deletePermanently
         minFreeSpaceGB = try values.decodeIfPresent(Int.self, forKey: .minFreeSpaceGB) ?? defaults.minFreeSpaceGB
@@ -148,7 +152,7 @@ struct DaylapseSettings: Codable, Equatable {
         intervalSeconds: Int, resumeCountdown: Bool, captureOnStart: Bool, showPointer: Bool, pauseWhenIdleSeconds: Int, pauseWhenLocked: Bool,
         pauseWhenMenuOpen: Bool, displays: String, halfSizeOnRetina: Bool, jpegQuality: Double, appMode: String,
         blockedApps: [AppRuleEntry], allowedApps: [AppRuleEntry], showNotifications: Bool,
-        showDesktopIcons: Bool, showWallpaper: Bool, backgroundHex: String, folderPath: String, deleteAfterDays: Int, deletePermanently: Bool,
+        showDesktopIcons: Bool, showWallpaper: Bool, backgroundHex: String, folderPath: String, projects: [Project], deleteAfterDays: Int, deletePermanently: Bool,
         minFreeSpaceGB: Int, exportFPS: Int, ffmpegPath: String, dayStartHour: Int, shortcut: ShortcutSettings
     ) {
         self.intervalSeconds = intervalSeconds
@@ -169,6 +173,7 @@ struct DaylapseSettings: Codable, Equatable {
         self.showWallpaper = showWallpaper
         self.backgroundHex = backgroundHex
         self.folderPath = folderPath
+        self.projects = projects
         self.deleteAfterDays = deleteAfterDays
         self.deletePermanently = deletePermanently
         self.minFreeSpaceGB = minFreeSpaceGB
@@ -209,12 +214,15 @@ final class SettingsStore {
                 }
             }
         }
+        settings.normalizeProjects()
         Storage.folderPath = settings.folderPath
         Exporter.customFFmpegPath = settings.ffmpegPath
         Storage.dayStartHour = settings.dayStartHour
     }
 
-    func save(_ newSettings: DaylapseSettings) throws {
+    func save(_ saved: DaylapseSettings) throws {
+        var newSettings = saved
+        newSettings.normalizeProjects()
         Storage.folderPath = newSettings.folderPath
         Exporter.customFFmpegPath = newSettings.ffmpegPath
         Storage.dayStartHour = newSettings.dayStartHour

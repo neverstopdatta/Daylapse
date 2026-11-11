@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var systemState: SystemState!
     private var blockItem: NSMenuItem!
     private var exportItem: NSMenuItem!
+    private var projectItem: NSMenuItem!
 
     private lazy var menuBarImage: NSImage? = Self.menuBarIcon()
 
@@ -47,6 +48,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         blockItem = NSMenuItem(title: "Block Frontmost App", action: #selector(toggleFrontmostRule), keyEquivalent: "")
         menu.addItem(blockItem)
         menu.addItem(.separator())
+        projectItem = NSMenuItem(title: "Project", action: nil, keyEquivalent: "")
+        projectItem.submenu = NSMenu()
+        menu.addItem(projectItem)
         exportItem = NSMenuItem(title: "Export Today as Video", action: #selector(exportToday), keyEquivalent: "")
         menu.addItem(exportItem)
         let folderItem = NSMenuItem(title: "Open Screenshots Folder", action: #selector(openScreenshotsFolder), keyEquivalent: "")
@@ -103,9 +107,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @MainActor private func runRetention() {
         let current = SettingsStore.shared.settings
         guard current.deleteAfterDays > 0 else { return }
-        let folder = Storage.screenshotsFolder
+        let folders = current.projects.map(\.url)
         DispatchQueue.global(qos: .utility).async {
-            let count = Storage.deleteDays(in: folder, olderThan: current.deleteAfterDays, permanently: current.deletePermanently)
+            var count = 0
+            for folder in folders {
+                count += Storage.deleteDays(in: folder, olderThan: current.deleteAfterDays, permanently: current.deletePermanently)
+            }
             if count > 0 { DaylapseLog.write("Retention removed \(count) day folders") }
         }
     }
@@ -200,11 +207,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @MainActor func menuWillOpen(_ menu: NSMenu) {
         updateBlockMenuItem()
+        updateProjectMenu()
         captureEngine.isMenuOpen = true
     }
 
     @MainActor func menuDidClose(_ menu: NSMenu) {
         captureEngine.isMenuOpen = false
+    }
+
+    // A submenu that opens to the side when the item is hovered.
+    @MainActor private func updateProjectMenu() {
+        let current = SettingsStore.shared.settings
+        projectItem.title = "Project: \(current.activeProjectName)"
+        let submenu = projectItem.submenu ?? NSMenu()
+        submenu.removeAllItems()
+        for project in current.projects {
+            let item = NSMenuItem(title: project.name, action: #selector(selectProject(_:)), keyEquivalent: "")
+            item.representedObject = project.path
+            item.state = project.path == current.folderPath ? .on : .off
+            submenu.addItem(item)
+        }
+        submenu.addItem(.separator())
+        submenu.addItem(NSMenuItem(title: "New Project…", action: #selector(newProject), keyEquivalent: ""))
+        projectItem.submenu = submenu
+    }
+
+    @MainActor @objc private func selectProject(_ sender: NSMenuItem) {
+        guard let path = sender.representedObject as? String else { return }
+        var updated = SettingsStore.shared.settings
+        updated.selectProject(path: path)
+        saveSettings(updated)
+    }
+
+    @MainActor @objc private func newProject() {
+        guard let name = ProjectPrompt.askName() else { return }
+        var updated = SettingsStore.shared.settings
+        if let error = updated.addProject(named: name) {
+            ProjectPrompt.showError(error)
+        } else {
+            saveSettings(updated)
+        }
+    }
+
+    @MainActor private func saveSettings(_ updated: DaylapseSettings) {
+        do {
+            try SettingsStore.shared.save(updated)
+        } catch {
+            DaylapseLog.write("Could not save settings: \(error.localizedDescription)")
+        }
     }
 
     @MainActor private func updateBlockMenuItem() {

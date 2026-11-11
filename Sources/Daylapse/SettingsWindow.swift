@@ -285,6 +285,10 @@ private struct TimelapseTab: View {
             reload()
             refreshFFmpeg()
         }
+        .onChange(of: settings.folderPath) { _, _ in
+            selected = []
+            reload()
+        }
     }
 
     private func warning(_ text: String) -> some View {
