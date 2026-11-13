@@ -2,7 +2,7 @@
 
 Notes for anyone working on the code: what it does and why. The README covers usage.
 
-The app is **Screenshots Timelapse**, SSTL in code: target and executable `SSTL`, bundle ID `dev.local.sstl`, type names like `SSTLSettings`. (The GitHub repository is still called Daylapse.)
+The app is **Screenshots Timelapse**, SSTL in code: target and executable `SSTL`, bundle ID `dev.local.sstl`, type names like `SSTLSettings`.
 
 ## Build and run
 

@@ -39,8 +39,8 @@ Then grant Screen Recording in System Settings > Privacy & Security.
 You need Xcode or the Xcode Command Line Tools (Swift 5.10+). There are no third-party packages.
 
 ```sh
-git clone https://github.com/neverstopdatta/Daylapse.git
-cd Daylapse
+git clone https://github.com/neverstopdatta/Screenshots-Timelapse.git
+cd Screenshots-Timelapse
 sh scripts/setup-signing.sh   # one time: creates a local code-signing certificate
 sh scripts/build.sh           # builds build/Screenshots Timelapse.app and launches it
 ```

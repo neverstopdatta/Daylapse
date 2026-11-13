@@ -2,8 +2,8 @@ import AppKit
 
 // Compares this build with the latest GitHub release and points to its page; nothing is downloaded or installed.
 enum UpdateChecker {
-    static let repositoryURL = URL(string: "https://github.com/neverstopdatta/Daylapse")!
-    private static let latestReleaseAPI = URL(string: "https://api.github.com/repos/neverstopdatta/Daylapse/releases/latest")!
+    static let repositoryURL = URL(string: "https://github.com/neverstopdatta/Screenshots-Timelapse")!
+    private static let latestReleaseAPI = URL(string: "https://api.github.com/repos/neverstopdatta/Screenshots-Timelapse/releases/latest")!
     private static let lastCheckKey = "lastUpdateCheck"
 
     static var currentVersion: String {
