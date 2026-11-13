@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-NAME="Daylapse Local Signing"
+NAME="SSTL Local Signing"
 security find-identity -p codesigning | grep -q "$NAME" && exit 0
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT

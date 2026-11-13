@@ -40,7 +40,7 @@ final class SystemState {
             Task { @MainActor in
                 guard let self else { return }
                 update(self)
-                DaylapseLog.write("System state: \(name)")
+                SSTLLog.write("System state: \(name)")
             }
         }
         observers.append((center, token))
@@ -54,8 +54,9 @@ final class SystemState {
     private func lowDisk(minGB: Int) -> Bool {
         if Date().timeIntervalSince(lastDiskCheck) >= 60 {
             lastDiskCheck = Date()
-            let folder = Storage.screenshotsFolder
-            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            // The nearest folder that exists is on the same disk, so nothing has to be created to ask.
+            var folder = Storage.screenshotsFolder
+            while !FileManager.default.fileExists(atPath: folder.path), folder.path != "/" { folder.deleteLastPathComponent() }
             let free = (try? folder.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
                 .volumeAvailableCapacityForImportantUsage
             isLowDisk = free.map { $0 < Int64(minGB) * 1_000_000_000 } ?? false

@@ -44,7 +44,7 @@ final class CaptureEngine {
             options: [.userInitiatedAllowingIdleSystemSleep],
             reason: "Screenshots Timelapse screenshot timer"
         )
-        DaylapseLog.write("Capture started")
+        SSTLLog.write("Capture started")
         let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
@@ -85,7 +85,7 @@ final class CaptureEngine {
             ProcessInfo.processInfo.endActivity(activity)
             self.activity = nil
         }
-        DaylapseLog.write("Capture stopped")
+        SSTLLog.write("Capture stopped")
         setStatus("○")
     }
 
@@ -165,7 +165,7 @@ final class CaptureEngine {
     private func setStatus(_ status: String) {
         guard lastStatus != status else { return }
         lastStatus = status
-        DaylapseLog.write("Status changed: \(status)")
+        SSTLLog.write("Status changed: \(status)")
         render(status)
     }
 }

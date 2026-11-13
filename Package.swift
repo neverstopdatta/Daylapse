@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "Daylapse",
+    name: "SSTL",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "Daylapse", targets: ["Daylapse"])
+        .executable(name: "SSTL", targets: ["SSTL"])
     ],
     targets: [
-        .executableTarget(name: "Daylapse", path: "Sources/Daylapse")
+        .executableTarget(name: "SSTL", path: "Sources/SSTL")
     ]
 )

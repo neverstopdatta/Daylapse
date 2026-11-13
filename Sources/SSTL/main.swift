@@ -14,7 +14,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var appRules: AppRules!
     private var systemState: SystemState!
     private var blockItem: NSMenuItem!
-    private var exportItem: NSMenuItem!
     private var projectItem: NSMenuItem!
 
     private lazy var menuBarImage: NSImage? = Self.menuBarIcon()
@@ -28,7 +27,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        Storage.migrateLegacyPaths()
         let settings = SettingsStore.shared
         appRules = AppRules(settings: settings)
         systemState = SystemState(settings: settings)
@@ -51,10 +49,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         projectItem = NSMenuItem(title: "Project", action: nil, keyEquivalent: "")
         projectItem.submenu = NSMenu()
         menu.addItem(projectItem)
-        exportItem = NSMenuItem(title: "Export Today as Video", action: #selector(exportToday), keyEquivalent: "")
-        menu.addItem(exportItem)
         let folderItem = NSMenuItem(title: "Open Screenshots Folder", action: #selector(openScreenshotsFolder), keyEquivalent: "")
         menu.addItem(folderItem)
+        menu.addItem(NSMenuItem(title: "Export Timelapse…", action: #selector(openTimelapseTab), keyEquivalent: ""))
         menu.addItem(.separator())
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.keyEquivalentModifierMask = [.command]
@@ -67,7 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             do {
                 try await Screenshotter.captureAllDisplays(appRules: self.appRules)
             } catch {
-                DaylapseLog.write("Screenshot failed: \(error.localizedDescription)")
+                SSTLLog.write("Screenshot failed: \(error.localizedDescription)")
             }
         }, pauseReason: { [weak self] in
             guard let self else { return .notAllowed }
@@ -76,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.renderStatus(text)
         })
         hotkey = Hotkey { [weak self] in
-            Task { @MainActor in self?.toggleCapture() }
+            Task { @MainActor in self?.performToggle(viaShortcut: true) }
         }
         ShortcutRegistrar.apply = { [weak self] keyCode, modifiers in
             guard let self else { return false }
@@ -89,13 +86,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return false
         }
         runRetention()
+        UpdateChecker.checkIfDue()
         let retentionTimer = Timer(timeInterval: 3600, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.runRetention() }
+            Task { @MainActor in
+                self?.runRetention()
+                UpdateChecker.checkIfDue()
+            }
         }
         RunLoop.main.add(retentionTimer, forMode: .common)
         if !hotkey.register(keyCode: settings.settings.shortcut.keyCode,
                             carbonModifiers: settings.settings.shortcut.carbonModifiers) {
-            DaylapseLog.write("Global shortcut registration failed")
+            SSTLLog.write("Global shortcut registration failed")
         }
     }
 
@@ -107,19 +108,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @MainActor private func runRetention() {
         let current = SettingsStore.shared.settings
         guard current.deleteAfterDays > 0 else { return }
-        let folders = current.projects.map(\.url)
+        let folders = SettingsStore.shared.projects.map { current.rootURL.appendingPathComponent($0, isDirectory: true) }
         DispatchQueue.global(qos: .utility).async {
             var count = 0
             for folder in folders {
                 count += Storage.deleteDays(in: folder, olderThan: current.deleteAfterDays, permanently: current.deletePermanently)
             }
-            if count > 0 { DaylapseLog.write("Retention removed \(count) day folders") }
+            if count > 0 { SSTLLog.write("Retention removed \(count) day folders") }
         }
     }
 
     @MainActor @objc private func toggleCapture() {
+        performToggle(viaShortcut: false)
+    }
+
+    // Sound and notification are only for the global shortcut, where there is no menu to show the change.
+    @MainActor private func performToggle(viaShortcut: Bool) {
         captureEngine.toggle()
         toggleItem.title = captureEngine.isStarted ? "Stop Screenshots" : "Start Screenshots"
+        if viaShortcut { ToggleFeedback.announce(started: captureEngine.isStarted, settings: SettingsStore.shared.settings) }
     }
 
     @MainActor private func renderStatus(_ text: String) {
@@ -146,28 +153,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return image
     }
 
-    @MainActor @objc private func exportToday() {
-        let day = Storage.dayName(for: Date())
-        exportItem.title = "Exporting…"
-        exportItem.isEnabled = false
-        let fps = SettingsStore.shared.settings.exportFPS
-        DispatchQueue.global().async {
-            let result = Result { try Exporter.export(day: day, fps: fps, in: Storage.screenshotsFolder) }
-            DispatchQueue.main.async { [weak self] in
-                self?.exportItem.title = "Export Today as Video"
-                self?.exportItem.isEnabled = true
-                Self.finishExport(result)
-            }
-        }
-    }
-
     @MainActor static func finishExport(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
-            DaylapseLog.write("Exported \(urls.map(\.lastPathComponent).joined(separator: ", "))")
+            SSTLLog.write("Exported \(urls.map(\.lastPathComponent).joined(separator: ", "))")
             NSWorkspace.shared.activateFileViewerSelecting(urls)
         case .failure(let error):
-            DaylapseLog.write("Export failed: \(error.localizedDescription)")
+            SSTLLog.write("Export failed: \(error.localizedDescription)")
             let alert = NSAlert()
             alert.messageText = "Export failed"
             alert.informativeText = error.localizedDescription
@@ -176,20 +168,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func openScreenshotsFolder() {
+        try? FileManager.default.createDirectory(at: Storage.screenshotsFolder, withIntermediateDirectories: true)
         NSWorkspace.shared.open(Storage.screenshotsFolder)
     }
 
     @MainActor @objc private func openSettings() {
+        showSettings(tab: nil)
+    }
+
+    @MainActor @objc private func openTimelapseTab() {
+        showSettings(tab: .timelapse)
+    }
+
+    @MainActor private func showSettings(tab: SettingsTab?) {
         if settingsWindowController == nil {
             settingsWindowController = SettingsWindowController()
         }
-        settingsWindowController?.showSettings()
+        settingsWindowController?.showSettings(tab: tab)
         if let window = settingsWindowController?.window, settingsObservers.isEmpty {
             let center = NotificationCenter.default
             for (name, active) in [(NSWindow.didBecomeKeyNotification, true), (NSWindow.didResignKeyNotification, false),
                                    (NSWindow.willCloseNotification, false)] {
                 settingsObservers.append(center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
-                    Task { @MainActor in self?.captureEngine.isSettingsActive = active }
+                    Task { @MainActor in
+                        if active { SettingsStore.shared.syncWithDisk() }
+                        self?.captureEngine.isSettingsActive = active
+                    }
                 })
             }
         }
@@ -201,12 +205,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             try appRules.toggleCurrentRule()
             updateBlockMenuItem()
         } catch {
-            DaylapseLog.write("Could not update app rule: \(error.localizedDescription)")
+            SSTLLog.write("Could not update app rule: \(error.localizedDescription)")
         }
     }
 
     @MainActor func menuWillOpen(_ menu: NSMenu) {
         updateBlockMenuItem()
+        SettingsStore.shared.syncWithDisk()
         updateProjectMenu()
         captureEngine.isMenuOpen = true
     }
@@ -218,13 +223,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // A submenu that opens to the side when the item is hovered.
     @MainActor private func updateProjectMenu() {
         let current = SettingsStore.shared.settings
-        projectItem.title = "Project: \(current.activeProjectName)"
+        projectItem.title = "Project: \(current.activeProject)"
         let submenu = projectItem.submenu ?? NSMenu()
         submenu.removeAllItems()
-        for project in current.projects {
-            let item = NSMenuItem(title: project.name, action: #selector(selectProject(_:)), keyEquivalent: "")
-            item.representedObject = project.path
-            item.state = project.path == current.folderPath ? .on : .off
+        for project in SettingsStore.shared.projects {
+            let item = NSMenuItem(title: project, action: #selector(selectProject(_:)), keyEquivalent: "")
+            item.representedObject = project
+            item.state = project == current.activeProject ? .on : .off
             submenu.addItem(item)
         }
         submenu.addItem(.separator())
@@ -233,9 +238,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @MainActor @objc private func selectProject(_ sender: NSMenuItem) {
-        guard let path = sender.representedObject as? String else { return }
+        guard let project = sender.representedObject as? String else { return }
         var updated = SettingsStore.shared.settings
-        updated.selectProject(path: path)
+        updated.activeProject = project
         saveSettings(updated)
     }
 
@@ -249,11 +254,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @MainActor private func saveSettings(_ updated: DaylapseSettings) {
+    @MainActor private func saveSettings(_ updated: SSTLSettings) {
         do {
             try SettingsStore.shared.save(updated)
         } catch {
-            DaylapseLog.write("Could not save settings: \(error.localizedDescription)")
+            SSTLLog.write("Could not save settings: \(error.localizedDescription)")
         }
     }
 

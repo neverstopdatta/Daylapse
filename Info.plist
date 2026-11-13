@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleIdentifier</key>
-	<string>dev.local.daylapse</string>
+	<string>dev.local.sstl</string>
 	<key>CFBundleExecutable</key>
-	<string>Daylapse</string>
+	<string>SSTL</string>
 	<key>CFBundleName</key>
 	<string>Screenshots Timelapse</string>
 	<key>CFBundleDisplayName</key>

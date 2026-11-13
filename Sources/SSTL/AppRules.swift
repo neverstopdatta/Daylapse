@@ -92,7 +92,7 @@ final class AppRules {
         try settings.save(current)
     }
 
-    func makeFilter(display: SCDisplay, content: SCShareableContent, settings snapshot: DaylapseSettings) -> SCContentFilter? {
+    func makeFilter(display: SCDisplay, content: SCShareableContent, settings snapshot: SSTLSettings) -> SCContentFilter? {
         logWindowOwners(content)
         let finderID = "com.apple.finder"
         let finderWindows = content.windows.filter { $0.owningApplication?.bundleIdentifier == finderID }
@@ -108,8 +108,8 @@ final class AppRules {
             // that is not allowed instead. Hiding by window leaves wallpaper and icons visible.
             if snapshot.showDesktopIcons {
                 let shown = allowedIDs
-                    .union(snapshot.showNotifications ? [DaylapseSettings.notificationBundleID] : [])
-                    .union(snapshot.showWallpaper ? [DaylapseSettings.wallpaperBundleID] : [])
+                    .union(snapshot.showNotifications ? [SSTLSettings.notificationBundleID] : [])
+                    .union(snapshot.showWallpaper ? [SSTLSettings.wallpaperBundleID] : [])
                 let hidden = content.windows.filter { window in
                     guard let id = window.owningApplication?.bundleIdentifier else { return true }
                     if shown.contains(id) { return false }
@@ -118,15 +118,15 @@ final class AppRules {
                 return SCContentFilter(display: display, excludingWindows: hidden)
             }
             var includedIDs = allowedIDs
-            if snapshot.showNotifications { includedIDs.insert(DaylapseSettings.notificationBundleID) }
-            if snapshot.showWallpaper { includedIDs.insert(DaylapseSettings.wallpaperBundleID) }
+            if snapshot.showNotifications { includedIDs.insert(SSTLSettings.notificationBundleID) }
+            if snapshot.showWallpaper { includedIDs.insert(SSTLSettings.wallpaperBundleID) }
             let included = content.applications.filter { includedIDs.contains($0.bundleIdentifier) }
             return SCContentFilter(display: display, including: included, exceptingWindows: [])
         }
 
         var excludedIDs = Set(snapshot.blockedApps.map(\.bundleID))
         if let ownBundleID = Bundle.main.bundleIdentifier { excludedIDs.insert(ownBundleID) }
-        if !snapshot.showNotifications { excludedIDs.insert(DaylapseSettings.notificationBundleID) }
+        if !snapshot.showNotifications { excludedIDs.insert(SSTLSettings.notificationBundleID) }
 
         // Excluding the wallpaper app does not remove the wallpaper, so hide it by window instead.
         // That is the only way the background colour can show through.
@@ -154,7 +154,7 @@ final class AppRules {
     private func isWallpaperWindow(_ window: SCWindow) -> Bool {
         let id = window.owningApplication?.bundleIdentifier ?? ""
         switch id {
-        case DaylapseSettings.wallpaperBundleID: return true
+        case SSTLSettings.wallpaperBundleID: return true
         case "com.apple.dock": return (window.title ?? "").hasPrefix("Wallpaper")
         case "": return window.title == "Desktop"
         default: return false
@@ -166,10 +166,10 @@ final class AppRules {
         let owners = Set(content.windows.compactMap { $0.owningApplication?.bundleIdentifier })
         guard owners != lastLoggedOwners else { return }
         lastLoggedOwners = owners
-        DaylapseLog.write("Window owners: \(owners.sorted().joined(separator: ", "))")
+        SSTLLog.write("Window owners: \(owners.sorted().joined(separator: ", "))")
     }
 
-    func frontmostStillAllowsCapture(settings snapshot: DaylapseSettings) -> Bool {
+    func frontmostStillAllowsCapture(settings snapshot: SSTLSettings) -> Bool {
         guard settings.settings == snapshot else { return false }
         return pauseReason() == nil
     }
@@ -179,7 +179,7 @@ final class AppRules {
             recordFrontmost(app)
         } else if lastExternalFrontmost != nil {
             lastExternalFrontmost = nil
-            DaylapseLog.write("Frontmost app unavailable")
+            SSTLLog.write("Frontmost app unavailable")
         }
     }
 
@@ -188,7 +188,7 @@ final class AppRules {
         let frontmost = Frontmost(bundleID: app.bundleIdentifier, name: app.localizedName ?? app.bundleIdentifier ?? "Unknown")
         guard lastExternalFrontmost?.bundleID != frontmost.bundleID || lastExternalFrontmost?.name != frontmost.name else { return }
         lastExternalFrontmost = frontmost
-        DaylapseLog.write("Frontmost app: \(frontmost.name) (\(frontmost.bundleID ?? "unknown bundle ID"))")
+        SSTLLog.write("Frontmost app: \(frontmost.name) (\(frontmost.bundleID ?? "unknown bundle ID"))")
     }
 
     private func quoted(_ name: String) -> String { "\"\(name)\"" }

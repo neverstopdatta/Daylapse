@@ -2,9 +2,21 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+enum SettingsTab: Hashable {
+    case general, capture, apps, storage, timelapse
+}
+
+// Lets the menu open Settings on a given tab.
+@MainActor
+@Observable
+final class SettingsTabSelection {
+    var tab = SettingsTab.general
+}
+
 @MainActor
 final class SettingsWindowController: NSWindowController {
     private var clickMonitor: Any?
+    private let selection: SettingsTabSelection
 
     convenience init() {
         let window = NSWindow(
@@ -15,8 +27,9 @@ final class SettingsWindowController: NSWindowController {
         )
         window.title = "SSTL Settings"
         window.center()
-        window.contentView = NSHostingView(rootView: SettingsWindowView())
-        self.init(window: window)
+        let selection = SettingsTabSelection()
+        window.contentView = NSHostingView(rootView: SettingsWindowView(selection: selection))
+        self.init(window: window, selection: selection)
         // Clicking outside a text field ends editing.
         clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak window] event in
             if let window, event.window === window,
@@ -29,7 +42,15 @@ final class SettingsWindowController: NSWindowController {
         }
     }
 
-    func showSettings() {
+    private init(window: NSWindow, selection: SettingsTabSelection) {
+        self.selection = selection
+        super.init(window: window)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    func showSettings(tab: SettingsTab?) {
+        if let tab { selection.tab = tab }
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -37,22 +58,28 @@ final class SettingsWindowController: NSWindowController {
 }
 
 private struct SettingsWindowView: View {
+    @Bindable var selection: SettingsTabSelection
     @State private var settings = SettingsStore.shared.settings
     // The last value this window wrote, so its own save is not echoed back over newer edits.
-    @State private var lastSaved: DaylapseSettings?
+    @State private var lastSaved: SSTLSettings?
 
     var body: some View {
-        TabView {
+        TabView(selection: $selection.tab) {
             GeneralTab(settings: $settings)
                 .tabItem { Text("General") }
+                .tag(SettingsTab.general)
             CaptureTab(settings: $settings)
                 .tabItem { Text("Capture") }
+                .tag(SettingsTab.capture)
             appsTab
                 .tabItem { Text("Apps") }
+                .tag(SettingsTab.apps)
             StorageTab(settings: $settings)
                 .tabItem { Text("Storage") }
+                .tag(SettingsTab.storage)
             TimelapseTab(settings: $settings)
                 .tabItem { Text("Timelapse") }
+                .tag(SettingsTab.timelapse)
         }
         .padding()
         .frame(minWidth: 520, minHeight: 390)
@@ -61,7 +88,7 @@ private struct SettingsWindowView: View {
             do {
                 try SettingsStore.shared.save(newSettings)
             } catch {
-                DaylapseLog.write("Could not save settings: \(error.localizedDescription)")
+                SSTLLog.write("Could not save settings: \(error.localizedDescription)")
             }
         }
         // The menu's block item saves directly, so keep this copy current.
@@ -104,8 +131,8 @@ private struct SettingsWindowView: View {
                     }
                 }
                 HStack {
-                    Button("Add App…", action: addAppFromDisk)
-                    Menu("Add Running App") {
+                    Spacer()
+                    Menu("Add App") {
                         let apps = runningApps
                         if apps.isEmpty {
                             Text("No running apps")
@@ -114,7 +141,10 @@ private struct SettingsWindowView: View {
                                 Button(app.name) { add(app) }
                             }
                         }
+                        Divider()
+                        Button("Choose from Applications…", action: addAppFromDisk)
                     }
+                    .fixedSize()
                 }
             }
 
@@ -189,17 +219,15 @@ private struct SettingsWindowView: View {
 }
 
 private struct TimelapseTab: View {
-    @Binding var settings: DaylapseSettings
+    @Binding var settings: SSTLSettings
     @State private var days: [Exporter.Day] = []
     @State private var selected: Set<String> = []
     @State private var exporting = false
     @State private var merge = false
     @State private var showSessionNote = false
     @AppStorage("exportNewestFirst") private var newestFirst = true
-    @State private var ffmpeg: (url: URL, custom: Bool)?
-    @State private var ffmpegVersion: String?
-    @State private var ffmpegProblem: String?
-    @State private var misfiled: [(url: URL, day: String)] = []
+    @State private var job: ExportJob?
+    @State private var progress = 0.0
 
     private let sessionNote = "These days aren't consecutive.\nCheck they're from the same session."
     private var mergeActive: Bool { merge && selected.count > 1 }
@@ -207,15 +235,9 @@ private struct TimelapseTab: View {
 
     var body: some View {
         Form {
-            if ffmpeg == nil { ffmpegSection }
-            if !misfiled.isEmpty {
-                Section {
-                    warning("\(misfiled.count) screenshots are filed under a different day than \"New day starts at\" (Storage tab) expects.")
-                    HStack {
-                        Spacer()
-                        Button("Move them to the right day", action: fixMisfiled)
-                    }
-                    .listRowBackground(Color.yellow.opacity(0.18))
+            Section {
+                Picker("Project", selection: $settings.activeProject) {
+                    ForEach(SettingsStore.shared.projects, id: \.self) { Text($0).tag($0) }
                 }
             }
             Section {
@@ -224,9 +246,18 @@ private struct TimelapseTab: View {
                     Text(selected.isEmpty ? "Select the days to export." : "\(selected.count) selected")
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Button("Refresh") { reload() }
-                    Button(exporting ? "Exporting…" : "Export") { export() }
-                        .disabled(exporting || selected.isEmpty || ffmpeg == nil)
+                    if exporting {
+                        ProgressView(value: progress).frame(width: 120)
+                        Button("Cancel") { job?.cancel() }
+                    } else {
+                        Picker("Format", selection: $settings.exportFormat) {
+                            Text("MP4").tag("mp4")
+                            Text("GIF").tag("gif")
+                        }
+                        .labelsHidden().fixedSize()
+                        Button("Export") { export() }
+                            .disabled(selected.isEmpty)
+                    }
                 }
                 HStack(spacing: 6) {
                     Toggle("Combine selected days into one video", isOn: $merge)
@@ -246,7 +277,7 @@ private struct TimelapseTab: View {
                     .disabled(!(merge && selected.count > 1 && !consecutive))
                 }
             }
-            Section("Days") {
+            Section {
                 HStack {
                     Toggle("Select all", isOn: Binding(
                         get: { !days.isEmpty && selected.count == days.count },
@@ -277,96 +308,24 @@ private struct TimelapseTab: View {
                     }
                     .toggleStyle(.checkbox)
                 }
+            } header: {
+                HStack {
+                    Text("Days")
+                    Spacer()
+                    Button { reload() } label: { Image(systemName: "arrow.clockwise") }
+                        .buttonStyle(.borderless)
+                        .help("Refresh the list of days")
+                }
             }
-            if ffmpeg != nil { ffmpegSection }
         }
         .formStyle(.grouped)
-        .onAppear {
-            reload()
-            refreshFFmpeg()
-        }
+        .onAppear { reload() }
+        // New screenshots arrive while the window is closed, so look again when the app comes forward.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in reload() }
         .onChange(of: settings.folderPath) { _, _ in
             selected = []
             reload()
         }
-    }
-
-    private func warning(_ text: String) -> some View {
-        Label {
-            Text(text)
-        } icon: {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
-        }
-    }
-
-    @ViewBuilder private var ffmpegSection: some View {
-        let missing = ffmpeg == nil
-        Section("ffmpeg") {
-            if missing {
-                warning("ffmpeg is required to export videos and was not found.")
-                    .listRowBackground(Color.yellow.opacity(0.18))
-                Text("Install it, for example with Homebrew (brew install ffmpeg) or MacPorts (sudo port install ffmpeg), or choose an existing copy.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .listRowBackground(Color.yellow.opacity(0.18))
-            } else if let ffmpeg {
-                LabeledContent(ffmpeg.custom ? "Chosen" : "Auto-detected") {
-                    Text(ffmpeg.url.path).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
-                }
-                if let ffmpegVersion {
-                    LabeledContent("Version", value: ffmpegVersion)
-                }
-            }
-            if let ffmpegProblem {
-                warning(ffmpegProblem).listRowBackground(Color.yellow.opacity(0.18))
-            }
-            HStack {
-                if missing {
-                    Button("Copy Homebrew command") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString("brew install ffmpeg", forType: .string)
-                    }
-                }
-                Button("Choose…", action: chooseFFmpeg)
-                if !settings.ffmpegPath.isEmpty {
-                    Button("Use auto-detect") {
-                        settings.ffmpegPath = ""
-                        Exporter.customFFmpegPath = ""
-                        ffmpegProblem = nil
-                        refreshFFmpeg()
-                    }
-                }
-                Button("Check again", action: refreshFFmpeg)
-            }
-            .listRowBackground(missing ? Color.yellow.opacity(0.18) : nil)
-        }
-    }
-
-    private func refreshFFmpeg() {
-        let found = Exporter.ffmpegLocation()
-        ffmpeg = found
-        ffmpegVersion = found.flatMap { Exporter.ffmpegVersion(at: $0.url.path) }
-        if found != nil, ffmpegVersion == nil {
-            ffmpegProblem = "That file did not report an ffmpeg version, so exports may fail."
-        }
-    }
-
-    private func chooseFFmpeg() {
-        let panel = NSOpenPanel()
-        panel.message = "Choose the ffmpeg executable"
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.directoryURL = URL(fileURLWithPath: "/opt/homebrew/bin")
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        guard Exporter.ffmpegVersion(at: url.path) != nil else {
-            ffmpegProblem = "\(url.lastPathComponent) is not ffmpeg (it did not report a version), so it was not used."
-            return
-        }
-        ffmpegProblem = nil
-        settings.ffmpegPath = url.path
-        // The setting reaches Exporter on save, so apply it directly for the immediate re-check.
-        Exporter.customFFmpegPath = url.path
-        refreshFFmpeg()
     }
 
     private var consecutive: Bool {
@@ -377,48 +336,43 @@ private struct TimelapseTab: View {
 
     // Separate videos add up to the total; combined days make a single video.
     private var lengthText: String {
-        let frames = days.filter { selected.contains($0.name) }.map(\.videoFrames).reduce(0, +)
+        let gif = settings.exportFormat == "gif"
+        // A GIF holds at most gifMaxFrames per video, so long days are thinned out.
+        let counts = days.filter { selected.contains($0.name) }.map(\.videoFrames)
+        let frames = !gif ? counts.reduce(0, +)
+            : mergeActive ? min(counts.reduce(0, +), Exporter.gifMaxFrames)
+            : counts.map { min($0, Exporter.gifMaxFrames) }.reduce(0, +)
         guard frames > 0 else { return "Select days to see the length" }
         let seconds = Int((Double(frames) / Double(settings.exportFPS)).rounded(.up))
         return "\(DurationField.describe(seconds))\(selected.count > 1 && !mergeActive ? " in total" : "")"
     }
 
     private func reload() {
-        days = Exporter.days(in: Storage.screenshotsFolder)
+        let folder = settings.folderURL
+        days = Exporter.days(in: folder)
         selected = selected.filter { name in days.contains { $0.name == name } }
-        let folder = Storage.screenshotsFolder
-        DispatchQueue.global().async {
-            let found = Storage.misfiled(in: folder)
-            DispatchQueue.main.async { misfiled = found }
-        }
-    }
-
-    private func fixMisfiled() {
-        let folder = Storage.screenshotsFolder
-        let items = misfiled
-        DispatchQueue.global().async {
-            Storage.refile(items, in: folder)
-            DispatchQueue.main.async { reload() }
-        }
     }
 
     private func export() {
         exporting = true
-        let chosen = selected.sorted()
+        progress = 0
+        let newJob = ExportJob()
+        job = newJob
+        let batches = mergeActive ? [selected.sorted()] : selected.sorted().map { [$0] }
         let fps = settings.exportFPS
-        let combine = mergeActive
+        let format = settings.exportFormat
+        let folder = settings.folderURL
         DispatchQueue.global().async {
-            var results: [Result<[URL], Error>] = []
-            if combine {
-                results.append(Result { try Exporter.export(days: chosen, fps: fps, in: Storage.screenshotsFolder) })
-            } else {
-                for day in chosen {
-                    results.append(Result { try Exporter.export(day: day, fps: fps, in: Storage.screenshotsFolder) })
+            let result = Result {
+                try Exporter.export(batches: batches, fps: fps, format: format, in: folder, job: newJob) { value in
+                    DispatchQueue.main.async { progress = value }
                 }
             }
             DispatchQueue.main.async {
                 exporting = false
-                for result in results { AppDelegate.finishExport(result) }
+                job = nil
+                if case .failure(let error) = result, case ExportError.cancelled = error { return }
+                AppDelegate.finishExport(result)
             }
         }
     }

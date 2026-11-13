@@ -3,9 +3,10 @@ import ServiceManagement
 import SwiftUI
 
 struct GeneralTab: View {
-    @Binding var settings: DaylapseSettings
+    @Binding var settings: SSTLSettings
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
+    @State private var notificationsDenied = false
 
     var body: some View {
         Form {
@@ -28,14 +29,78 @@ struct GeneralTab: View {
                 LabeledContent("Start/Stop shortcut") {
                     ShortcutRecorder(shortcut: $settings.shortcut)
                 }
+                Toggle(isOn: $settings.notifyOnToggle) {
+                    HStack(spacing: 4) {
+                        Text("Show a notification")
+                        InfoButton("Shows a notification when starting or stopping capture with the shortcut.")
+                    }
+                }
+                .onChange(of: settings.notifyOnToggle) { _, on in
+                    guard on else { return }
+                    notificationsDenied = false
+                    ToggleFeedback.requestNotifications { granted in
+                        notificationsDenied = !granted
+                        if !granted { settings.notifyOnToggle = false }
+                    }
+                }
+                if notificationsDenied {
+                    Text("Allow notifications for Screenshots Timelapse in System Settings > Notifications.")
+                        .foregroundStyle(.red)
+                }
+                Toggle(isOn: $settings.soundOnToggle) {
+                    HStack(spacing: 4) {
+                        Text("Play a sound")
+                        InfoButton("Plays a sound when starting or stopping capture with the shortcut.")
+                    }
+                }
+                if settings.soundOnToggle {
+                    soundPicker("Start sound", selection: $settings.startSound)
+                    soundPicker("Stop sound", selection: $settings.stopSound)
+                }
+            }
+            Section {
+                Toggle("Check for updates automatically", isOn: $settings.checkForUpdates)
+                HStack {
+                    Text("Version \(UpdateChecker.currentVersion)").foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Check for Updates…") { UpdateChecker.check(userInitiated: true) }
+                }
             }
         }
         .formStyle(.grouped)
     }
+
+    // Choosing a sound plays it, so you hear what you pick.
+    private func soundPicker(_ title: String, selection: Binding<String>) -> some View {
+        Picker(title, selection: selection) {
+            ForEach(ToggleFeedback.soundNames, id: \.self) { Text($0).tag($0) }
+        }
+        .onChange(of: selection.wrappedValue) { _, name in ToggleFeedback.play(name) }
+    }
+}
+
+// The small ⓘ macOS uses for a longer explanation: opens a popover on click, tooltip on hover.
+struct InfoButton: View {
+    let text: String
+    @State private var shown = false
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Button { shown.toggle() } label: { Image(systemName: "info.circle") }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .help(text)
+            .popover(isPresented: $shown, arrowEdge: .bottom) {
+                Text(text).frame(width: 240, alignment: .leading).fixedSize(horizontal: false, vertical: true).padding(10)
+            }
+    }
 }
 
 struct CaptureTab: View {
-    @Binding var settings: DaylapseSettings
+    @Binding var settings: SSTLSettings
+    @State private var connectedDisplays = Displays.connected()
+
     var body: some View {
         Form {
             Section {
@@ -53,50 +118,84 @@ struct CaptureTab: View {
             Section {
             Picker("Displays", selection: $settings.displays) {
                 Text("All displays").tag("all")
-                Text("Main display only").tag("main")
+                Text("Main display (follows primary)").tag("main")
+                Divider()
+                ForEach(connectedDisplays, id: \.key) { Text($0.name).tag($0.key) }
+                if !["all", "main"].contains(settings.displays), !connectedDisplays.contains(where: { $0.key == settings.displays }) {
+                    Text("Disconnected display").tag(settings.displays)
+                }
             }
             Toggle("Half size on Retina", isOn: $settings.halfSizeOnRetina)
-            LabeledContent("JPEG quality \(Int(settings.jpegQuality * 100))%") {
-                Slider(value: $settings.jpegQuality, in: 0.3...1.0)
+            Picker("Format", selection: $settings.imageFormat) {
+                Text("JPEG").tag("jpeg")
+                if Screenshotter.heicAvailable { Text("HEIC").tag("heic") }
+                Text("PNG").tag("png")
+            }
+            if settings.imageFormat != "png" {
+                LabeledContent("Quality \(Int(settings.jpegQuality * 100))%") {
+                    Slider(value: $settings.jpegQuality, in: 0.3...1.0)
+                }
             }
             }
         }
         .formStyle(.grouped)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
+            connectedDisplays = Displays.connected()
+        }
     }
 }
 
 struct StorageTab: View {
-    @Binding var settings: DaylapseSettings
+    @Binding var settings: SSTLSettings
     @State private var usedBytes: Int64 = 0
+    @State private var nameDraft = ""
+    @FocusState private var nameFocused: Bool
+    // Folder names can't contain "/", so this tag never clashes with a project.
+    private static let newProjectTag = "/new"
 
     var body: some View {
         Form {
             Section {
-            Picker("Project", selection: $settings.folderPath) {
-                ForEach(settings.projects) { Text($0.name).tag($0.path) }
+            Picker("Project", selection: Binding(
+                get: { settings.activeProject },
+                set: { picked in
+                    if picked == Self.newProjectTag {
+                        DispatchQueue.main.async(execute: newProject)
+                    } else {
+                        settings.activeProject = picked
+                    }
+                }
+            )) {
+                ForEach(SettingsStore.shared.projects, id: \.self) { Text($0).tag($0) }
+                Divider()
+                Text("New Project…").tag(Self.newProjectTag)
             }
-            TextField("Name", text: projectName)
-            HStack {
-                Button("New Project…", action: newProject)
-                Button("Remove Project…", role: .destructive, action: removeProject)
-                    .disabled(settings.projects.count < 2)
+            TextField("Name", text: $nameDraft)
+                .focused($nameFocused)
+                .onSubmit(commitName)
+            LabeledContent("Location") {
+                HStack {
+                    Text(settings.rootPath).lineLimit(1).truncationMode(.middle)
+                    Button("Change…", action: chooseRoot)
+                }
             }
-            LabeledContent("Folder") {
-                Text(settings.folderPath).lineLimit(1).truncationMode(.middle)
+            LabeledContent("Used") {
+                HStack {
+                    Text(ByteCountFormatter.string(fromByteCount: usedBytes, countStyle: .file))
+                    Button("Show in Finder") {
+                        try? FileManager.default.createDirectory(at: settings.folderURL, withIntermediateDirectories: true)
+                        NSWorkspace.shared.open(settings.folderURL)
+                    }
+                }
             }
-            HStack {
-                Button("Change…", action: chooseFolder)
-                Button("Show in Finder") { NSWorkspace.shared.open(Storage.screenshotsFolder) }
-            }
-            LabeledContent("Used", value: ByteCountFormatter.string(fromByteCount: usedBytes, countStyle: .file))
-            Button("Delete All in Project…", role: .destructive, action: deleteAll)
             }
             Section {
-            Picker("New day starts at", selection: $settings.dayStartHour) {
-                ForEach(0...8, id: \.self) { Text(String(format: "%02d:00", $0)).tag($0) }
+            HStack {
+                Spacer()
+                Button("Delete All Screenshots…", role: .destructive, action: deleteAll)
+                Button("Remove Project…", role: .destructive, action: removeProject)
+                    .disabled(SettingsStore.shared.projects.count < 2)
             }
-            Text("Screenshots taken before this time are filed under the previous day.")
-                .font(.caption).foregroundStyle(.secondary)
             }
             Section {
             Picker("Delete older than", selection: $settings.deleteAfterDays) {
@@ -112,36 +211,50 @@ struct StorageTab: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear(perform: refreshSize)
-        .onChange(of: settings.folderPath) { _, _ in refreshSize() }
+        .onAppear {
+            nameDraft = settings.activeProject
+            refreshSize()
+        }
+        .onChange(of: settings.folderPath) { _, _ in
+            nameDraft = settings.activeProject
+            refreshSize()
+        }
+        .onChange(of: nameFocused) { _, focused in if !focused { commitName() } }
     }
 
+    // Reads the folder from this tab's settings (not Storage, which updates a moment later)
+    // and ignores a result if the project changed meanwhile.
     private func refreshSize() {
-        let folder = Storage.screenshotsFolder
+        let folder = settings.folderURL
+        usedBytes = 0
         DispatchQueue.global().async {
             let size = Storage.usedBytes(in: folder)
-            DispatchQueue.main.async { usedBytes = size }
+            DispatchQueue.main.async { if folder == settings.folderURL { usedBytes = size } }
         }
     }
 
-    private func chooseFolder() {
+    private func commitName() {
+        if let error = settings.renameActiveProject(to: nameDraft) { ProjectPrompt.showError(error) }
+        nameDraft = settings.activeProject
+    }
+
+    private func chooseRoot() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        panel.directoryURL = Storage.screenshotsFolder.deletingLastPathComponent()
+        panel.message = "Each folder inside the chosen folder is a project."
+        panel.prompt = "Choose"
+        panel.directoryURL = settings.rootURL
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        if !settings.setActiveFolder((url.path as NSString).abbreviatingWithTildeInPath) {
-            ProjectPrompt.showError("Another project already uses that folder.")
+        // Day folders mean a project folder was picked instead of the folder holding the projects.
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? []
+        if names.contains(where: { Storage.dayDate($0) != nil }) {
+            ProjectPrompt.showError("That folder holds screenshots. Choose the folder that contains your project folders.")
+            return
         }
-    }
-
-    private var projectName: Binding<String> {
-        Binding(
-            get: { settings.activeIndex.map { settings.projects[$0].name } ?? "" },
-            set: { if let index = settings.activeIndex { settings.projects[index].name = $0 } }
-        )
+        settings.rootPath = (url.path as NSString).abbreviatingWithTildeInPath
     }
 
     private func newProject() {
@@ -151,17 +264,20 @@ struct StorageTab: View {
 
     private func removeProject() {
         let alert = NSAlert()
-        alert.messageText = "Remove \"\(settings.activeProjectName)\"?"
-        alert.informativeText = "The project leaves the list. Its screenshots and videos stay in the folder."
+        alert.messageText = "Remove \"\(settings.activeProject)\"?"
+        alert.informativeText = settings.deletePermanently
+            ? "Its folder, including screenshots and exported videos, will be deleted permanently."
+            : "Its folder, including screenshots and exported videos, will be moved to the Trash."
+        alert.alertStyle = .warning
         alert.addButton(withTitle: "Remove")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        settings.removeActiveProject()
+        if let error = settings.removeActiveProject() { ProjectPrompt.showError(error) }
     }
 
     private func deleteAll() {
         let alert = NSAlert()
-        alert.messageText = "Delete all screenshots in \"\(settings.activeProjectName)\"?"
+        alert.messageText = "Delete all screenshots in \"\(settings.activeProject)\"?"
         alert.informativeText = settings.deletePermanently
             ? "All day folders will be deleted permanently. Exported videos are kept."
             : "All day folders will be moved to the Trash. Exported videos are kept."
@@ -169,8 +285,8 @@ struct StorageTab: View {
         alert.addButton(withTitle: "Delete All")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let count = Storage.deleteDays(in: Storage.screenshotsFolder, olderThan: nil, permanently: settings.deletePermanently)
-        DaylapseLog.write("Delete All removed \(count) day folders")
+        let count = Storage.deleteDays(in: settings.folderURL, olderThan: nil, permanently: settings.deletePermanently)
+        SSTLLog.write("Delete All removed \(count) day folders")
         refreshSize()
     }
 }

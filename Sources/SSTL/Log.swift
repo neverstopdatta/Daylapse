@@ -1,6 +1,6 @@
 import Foundation
 
-enum DaylapseLog {
+enum SSTLLog {
     private static let lock = NSLock()
     private static let logURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Logs/Screenshots Timelapse.log")
@@ -24,7 +24,7 @@ enum DaylapseLog {
                 try Data(line.utf8).write(to: logURL, options: .atomic)
             }
         } catch {
-            NSLog("Daylapse log write failed: %@", error.localizedDescription)
+            NSLog("SSTL log write failed: %@", error.localizedDescription)
         }
     }
 }
