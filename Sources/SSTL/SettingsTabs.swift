@@ -32,7 +32,7 @@ struct GeneralTab: View {
                 Toggle(isOn: $settings.notifyOnToggle) {
                     HStack(spacing: 4) {
                         Text("Show a notification")
-                        InfoButton("Shows a notification when starting or stopping capture with the shortcut.")
+                        InfoButton("Shows a notification when using the shortcut.")
                     }
                 }
                 .onChange(of: settings.notifyOnToggle) { _, on in
@@ -50,7 +50,7 @@ struct GeneralTab: View {
                 Toggle(isOn: $settings.soundOnToggle) {
                     HStack(spacing: 4) {
                         Text("Play a sound")
-                        InfoButton("Plays a sound when starting or stopping capture with the shortcut.")
+                        InfoButton("Plays a sound when using the shortcut.")
                     }
                 }
                 if settings.soundOnToggle {
@@ -63,6 +63,12 @@ struct GeneralTab: View {
                 HStack {
                     Text("Version \(UpdateChecker.currentVersion)").foregroundStyle(.secondary)
                     Spacer()
+                    Button { NSWorkspace.shared.open(UpdateChecker.repositoryURL) } label: {
+                        HStack(spacing: 3) {
+                            Text("GitHub")
+                            Image(systemName: "arrow.up.right")
+                        }
+                    }
                     Button("Check for Updates…") { UpdateChecker.check(userInitiated: true) }
                 }
             }

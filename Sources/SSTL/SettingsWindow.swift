@@ -2,8 +2,20 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-enum SettingsTab: Hashable {
+enum SettingsTab: String, CaseIterable {
     case general, capture, apps, storage, timelapse
+
+    var title: String { rawValue.capitalized }
+
+    var symbol: String {
+        switch self {
+        case .general: "gearshape"
+        case .capture: "camera.viewfinder"
+        case .apps: "square.grid.2x2"
+        case .storage: "internaldrive"
+        case .timelapse: "film"
+        }
+    }
 }
 
 // Lets the menu open Settings on a given tab.
@@ -14,7 +26,7 @@ final class SettingsTabSelection {
 }
 
 @MainActor
-final class SettingsWindowController: NSWindowController {
+final class SettingsWindowController: NSWindowController, NSToolbarDelegate {
     private var clickMonitor: Any?
     private let selection: SettingsTabSelection
 
@@ -25,11 +37,17 @@ final class SettingsWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "SSTL Settings"
         window.center()
         let selection = SettingsTabSelection()
         window.contentView = NSHostingView(rootView: SettingsWindowView(selection: selection))
         self.init(window: window, selection: selection)
+        // Icon tabs in the toolbar, like System Settings and most Mac apps; the window title follows the tab.
+        let toolbar = NSToolbar(identifier: "SettingsTabs")
+        toolbar.delegate = self
+        toolbar.allowsUserCustomization = false
+        window.toolbar = toolbar
+        window.toolbarStyle = .preference
+        apply(.general)
         // Clicking outside a text field ends editing.
         clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak window] event in
             if let window, event.window === window,
@@ -49,8 +67,34 @@ final class SettingsWindowController: NSWindowController {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
+    private func apply(_ tab: SettingsTab) {
+        selection.tab = tab
+        window?.toolbar?.selectedItemIdentifier = NSToolbarItem.Identifier(tab.rawValue)
+        window?.title = tab.title
+    }
+
+    @objc private func selectTab(_ item: NSToolbarItem) {
+        if let tab = SettingsTab(rawValue: item.itemIdentifier.rawValue) { apply(tab) }
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { identifiers }
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { identifiers }
+    func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { identifiers }
+    private var identifiers: [NSToolbarItem.Identifier] { SettingsTab.allCases.map { NSToolbarItem.Identifier($0.rawValue) } }
+
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+                             willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        guard let tab = SettingsTab(rawValue: itemIdentifier.rawValue) else { return nil }
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        item.label = tab.title
+        item.image = NSImage(systemSymbolName: tab.symbol, accessibilityDescription: tab.title)
+        item.target = self
+        item.action = #selector(selectTab(_:))
+        return item
+    }
+
     func showSettings(tab: SettingsTab?) {
-        if let tab { selection.tab = tab }
+        if let tab { apply(tab) }
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -64,24 +108,15 @@ private struct SettingsWindowView: View {
     @State private var lastSaved: SSTLSettings?
 
     var body: some View {
-        TabView(selection: $selection.tab) {
-            GeneralTab(settings: $settings)
-                .tabItem { Text("General") }
-                .tag(SettingsTab.general)
-            CaptureTab(settings: $settings)
-                .tabItem { Text("Capture") }
-                .tag(SettingsTab.capture)
-            appsTab
-                .tabItem { Text("Apps") }
-                .tag(SettingsTab.apps)
-            StorageTab(settings: $settings)
-                .tabItem { Text("Storage") }
-                .tag(SettingsTab.storage)
-            TimelapseTab(settings: $settings)
-                .tabItem { Text("Timelapse") }
-                .tag(SettingsTab.timelapse)
+        Group {
+            switch selection.tab {
+            case .general: GeneralTab(settings: $settings)
+            case .capture: CaptureTab(settings: $settings)
+            case .apps: appsTab
+            case .storage: StorageTab(settings: $settings)
+            case .timelapse: TimelapseTab(settings: $settings)
+            }
         }
-        .padding()
         .frame(minWidth: 520, minHeight: 390)
         .onChange(of: settings) { _, newSettings in
             lastSaved = newSettings
@@ -259,6 +294,19 @@ private struct TimelapseTab: View {
                             .disabled(selected.isEmpty)
                     }
                 }
+                if settings.exportFormat == "gif" {
+                    Picker("GIF size", selection: $settings.gifMaxSide) {
+                        Text("Small (480 px)").tag(480)
+                        Text("Medium (720 px)").tag(720)
+                        Text("Large (1080 px)").tag(1080)
+                    }
+                    Picker("GIF colours", selection: $settings.gifColors) {
+                        Text("256").tag(256)
+                        Text("128").tag(128)
+                        Text("64").tag(64)
+                    }
+                    Toggle("Dither gradients", isOn: $settings.gifDither)
+                }
                 HStack(spacing: 6) {
                     Toggle("Combine selected days into one video", isOn: $merge)
                         .toggleStyle(.checkbox)
@@ -336,12 +384,8 @@ private struct TimelapseTab: View {
 
     // Separate videos add up to the total; combined days make a single video.
     private var lengthText: String {
-        let gif = settings.exportFormat == "gif"
-        // A GIF holds at most gifMaxFrames per video, so long days are thinned out.
         let counts = days.filter { selected.contains($0.name) }.map(\.videoFrames)
-        let frames = !gif ? counts.reduce(0, +)
-            : mergeActive ? min(counts.reduce(0, +), Exporter.gifMaxFrames)
-            : counts.map { min($0, Exporter.gifMaxFrames) }.reduce(0, +)
+        let frames = counts.reduce(0, +)
         guard frames > 0 else { return "Select days to see the length" }
         let seconds = Int((Double(frames) / Double(settings.exportFPS)).rounded(.up))
         return "\(DurationField.describe(seconds))\(selected.count > 1 && !mergeActive ? " in total" : "")"
@@ -361,10 +405,11 @@ private struct TimelapseTab: View {
         let batches = mergeActive ? [selected.sorted()] : selected.sorted().map { [$0] }
         let fps = settings.exportFPS
         let format = settings.exportFormat
+        let gifOptions = GIFOptions(maxSide: settings.gifMaxSide, colors: settings.gifColors, dither: settings.gifDither)
         let folder = settings.folderURL
         DispatchQueue.global().async {
             let result = Result {
-                try Exporter.export(batches: batches, fps: fps, format: format, in: folder, job: newJob) { value in
+                try Exporter.export(batches: batches, fps: fps, format: format, gif: gifOptions, in: folder, job: newJob) { value in
                     DispatchQueue.main.async { progress = value }
                 }
             }

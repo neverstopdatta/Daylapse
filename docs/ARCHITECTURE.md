@@ -35,6 +35,7 @@ The default root is `~/Pictures/SSTL`.
 | `Projects.swift` | Project = folder; add/rename/remove; name checks; the New Project prompt |
 | `Storage.swift` | Paths, day naming, retention deletes, size |
 | `Displays.swift` | Stable display keys, file-name suffix, display picker options |
+| `GIFWriter.swift` | Streaming GIF encoder: palette, quantiser, frame diff, LZW |
 | `Exporter.swift` | Lists days and writes videos with AVFoundation (`AVAssetWriter`) |
 | `ToggleFeedback.swift` | Notification and system sound when the global shortcut starts or stops capture |
 | `Hotkey.swift` | Global start/stop shortcut via Carbon `RegisterEventHotKey` |
@@ -103,7 +104,12 @@ The default root is `~/Pictures/SSTL`.
 - Each frame is decoded with ImageIO and drawn (colour-managed, sRGB) into a BGRA pixel buffer; AVAssetWriter converts and encodes on the hardware encoder. A batch of frames is decoded in parallel while the previous batch is appended. Output is tagged BT.709.
 - Speed is set by the hardware encoder, not decoding: 1,000 Retina frames (2940×1912) take about 11 s, the same as ffmpeg's `h264_videotoolbox` did. Half-size frames are about 4× faster.
 - Writing for network use leaves a `<video>.mp4.sb-…` scratch file; `removeScratch` deletes it.
-- **GIF** (`exportFormat` = `gif`): ImageIO's GIF writer, frames shrunk to 720 px on the long side, at most `gifMaxFrames` (300) evenly spaced frames, because ImageIO holds every frame in memory until the file is finished (about 1.2 GB peak at 300). Same size rule and Cancel as video.
+- **GIF** (`exportFormat` = `gif`), written by our own streaming encoder in `GIFWriter.swift` (ImageIO's GIF writer holds every frame in memory, about 4 GB per 1,000 frames):
+  1. The palette comes from 16 evenly spaced frames: a histogram of 5-bit colour cells with exact colour sums, split by median cut into up to 255 colours (the last table entry is reserved for "unchanged"). A 6-bit-per-channel lookup table maps any colour to its nearest palette entry.
+  2. Frames are decoded and mapped to palette indices several at a time, while the previous batch is written. Optional 4×4 ordered dithering (`gifDither`) is used because it gives the same result for the same pixel in every frame; error diffusion would shimmer in still areas.
+  3. `GIFWriter.add` compares each frame with the previous one, keeps only the changed rectangle (unchanged pixels inside it become the transparent index, disposal "do not dispose"), compresses it with variable-width LZW and writes it at once. A frame with no change is a 1×1 transparent frame.
+  4. Delays are whole hundredths of a second, taken from the rounded running total so the average speed matches the fps setting.
+  Options (`GIFOptions`): longest side 480/720/1080 px, 64/128/256 colours, dither. Memory stays flat (about 150 MB at 1,000 Retina frames). Checked by decoding with ffmpeg: frame count, duration and PSNR of 36–38 dB at 256 colours.
 - All exporting happens in the Timelapse tab. The menu's "Export Timelapse…" only opens that tab.
 
 ## Start/stop feedback

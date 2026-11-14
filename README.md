@@ -6,7 +6,7 @@ Screenshots Timelapse is an independent project. It is not affiliated with or en
 
 ## Features
 
-- Captures the screen every N seconds (default 30), with optional capture on start
+- Captures the screen every N seconds (default 10), with optional capture on start
 - Choose which display to capture (all, the main one, or a specific screen) and the image format (JPEG, HEIC or PNG)
 - Block or allow specific apps so they never appear in frames
 - Optionally show or hide the wallpaper, desktop icons and notifications
@@ -64,7 +64,7 @@ For how the code is organised and why, see [docs/ARCHITECTURE.md](docs/ARCHITECT
 
 ## Tips
 
-- **GIFs** are for short clips: frames are shrunk to 720 px and a selection longer than 300 frames is thinned to 300 evenly spaced ones.
+- **GIFs** are written frame by frame, so even long clips use little memory. Choose the size, colours (256 looks best) and optional dithering in the Timelapse tab. Only the part of the screen that changed is stored for each frame, so mostly still recordings stay small.
 - **Trim frames without an editor:** open a day folder in Finder, select the first frame and press Space for Quick Look. Use the arrow keys to step through frames, and press ⌘⌫ on any frame you don't want in the video. Export from the Timelapse tab afterwards.
 
 ## Updates
@@ -73,4 +73,4 @@ Settings > General shows the version and can check GitHub for a newer release, a
 
 ## License
 
-[MIT](LICENSE)
+Copyright (c) 2026 neverstopdatta. Licensed under the [GNU General Public License v3.0](LICENSE). You can use, modify and share it, but anyone who distributes a modified version must also release it under the GPL with its source.

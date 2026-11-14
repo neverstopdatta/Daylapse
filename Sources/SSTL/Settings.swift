@@ -48,10 +48,13 @@ struct SSTLSettings: Codable, Equatable {
     var startSound: String
     var stopSound: String
     var exportFormat: String
+    var gifMaxSide: Int
+    var gifColors: Int
+    var gifDither: Bool
     var shortcut: ShortcutSettings
 
     static let defaults = SSTLSettings(
-        intervalSeconds: 30,
+        intervalSeconds: 10,
         resumeCountdown: false,
         captureOnStart: true,
         showPointer: false,
@@ -81,6 +84,9 @@ struct SSTLSettings: Codable, Equatable {
         startSound: "Glass",
         stopSound: "Funk",
         exportFormat: "mp4",
+        gifMaxSide: 720,
+        gifColors: 256,
+        gifDither: false,
         shortcut: .default
     )
 
@@ -89,7 +95,7 @@ struct SSTLSettings: Codable, Equatable {
         case halfSizeOnRetina, jpegQuality, imageFormat, appMode, blockedApps, allowedApps
         case showNotifications, showDesktopIcons, showWallpaper, backgroundHex, hideNotifications, hideDesktopIcons
         case rootPath, activeProject, deleteAfterDays
-        case deletePermanently, minFreeSpaceGB, exportFPS, checkForUpdates, notifyOnToggle, soundOnToggle, startSound, stopSound, exportFormat, shortcut
+        case deletePermanently, minFreeSpaceGB, exportFPS, checkForUpdates, notifyOnToggle, soundOnToggle, startSound, stopSound, exportFormat, gifMaxSide, gifColors, gifDither, shortcut
     }
 
     func encode(to encoder: Encoder) throws {
@@ -124,6 +130,9 @@ struct SSTLSettings: Codable, Equatable {
         try c.encode(startSound, forKey: .startSound)
         try c.encode(stopSound, forKey: .stopSound)
         try c.encode(exportFormat, forKey: .exportFormat)
+        try c.encode(gifMaxSide, forKey: .gifMaxSide)
+        try c.encode(gifColors, forKey: .gifColors)
+        try c.encode(gifDither, forKey: .gifDither)
         try c.encode(shortcut, forKey: .shortcut)
     }
 
@@ -165,6 +174,9 @@ struct SSTLSettings: Codable, Equatable {
         startSound = try values.decodeIfPresent(String.self, forKey: .startSound) ?? defaults.startSound
         stopSound = try values.decodeIfPresent(String.self, forKey: .stopSound) ?? defaults.stopSound
         exportFormat = try values.decodeIfPresent(String.self, forKey: .exportFormat) ?? defaults.exportFormat
+        gifMaxSide = try values.decodeIfPresent(Int.self, forKey: .gifMaxSide) ?? defaults.gifMaxSide
+        gifColors = try values.decodeIfPresent(Int.self, forKey: .gifColors) ?? defaults.gifColors
+        gifDither = try values.decodeIfPresent(Bool.self, forKey: .gifDither) ?? defaults.gifDither
         shortcut = try values.decodeIfPresent(ShortcutSettings.self, forKey: .shortcut) ?? defaults.shortcut
     }
 
@@ -173,7 +185,7 @@ struct SSTLSettings: Codable, Equatable {
         pauseWhenMenuOpen: Bool, displays: String, halfSizeOnRetina: Bool, jpegQuality: Double, imageFormat: String, appMode: String,
         blockedApps: [AppRuleEntry], allowedApps: [AppRuleEntry], showNotifications: Bool,
         showDesktopIcons: Bool, showWallpaper: Bool, backgroundHex: String, rootPath: String, activeProject: String, deleteAfterDays: Int, deletePermanently: Bool,
-        minFreeSpaceGB: Int, exportFPS: Int, checkForUpdates: Bool, notifyOnToggle: Bool, soundOnToggle: Bool, startSound: String, stopSound: String, exportFormat: String, shortcut: ShortcutSettings
+        minFreeSpaceGB: Int, exportFPS: Int, checkForUpdates: Bool, notifyOnToggle: Bool, soundOnToggle: Bool, startSound: String, stopSound: String, exportFormat: String, gifMaxSide: Int, gifColors: Int, gifDither: Bool, shortcut: ShortcutSettings
     ) {
         self.intervalSeconds = intervalSeconds
         self.resumeCountdown = resumeCountdown
@@ -205,6 +217,9 @@ struct SSTLSettings: Codable, Equatable {
         self.startSound = startSound
         self.stopSound = stopSound
         self.exportFormat = exportFormat
+        self.gifMaxSide = gifMaxSide
+        self.gifColors = gifColors
+        self.gifDither = gifDither
         self.shortcut = shortcut
     }
 }

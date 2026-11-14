@@ -64,7 +64,7 @@ enum Exporter {
 
     // Blocking: call from a background queue. Each batch (one or more days) becomes one video per display.
     // `progress` gets 0...1 across everything; the call throws `.cancelled` once the job is cancelled.
-    static func export(batches: [[String]], fps: Int, format: String = "mp4", in folder: URL, job: ExportJob, progress: (Double) -> Void) throws -> [URL] {
+    static func export(batches: [[String]], fps: Int, format: String = "mp4", gif: GIFOptions = GIFOptions(), in folder: URL, job: ExportJob, progress: (Double) -> Void) throws -> [URL] {
         let ext = format == "gif" ? "gif" : "mp4"
         struct Task { let out: URL; let files: [URL] }
         let exports = folder.appendingPathComponent("Exports", isDirectory: true)
@@ -82,18 +82,18 @@ enum Exporter {
         }
         try FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
 
-        let total = max(1, tasks.reduce(0) { $0 + (ext == "gif" ? min($1.files.count, gifMaxFrames) : $1.files.count) })
+        let total = max(1, tasks.reduce(0) { $0 + $1.files.count })
         var finished = 0
         var outputs: [URL] = []
         for task in tasks {
             let before = finished
             let report = { (done: Int) in progress(Double(before + done) / Double(total)) }
             if ext == "gif" {
-                try encodeGIF(task.files, fps: fps, out: task.out, job: job, report: report)
+                try encodeGIF(task.files, fps: fps, options: gif, out: task.out, job: job, report: report)
             } else {
                 try encode(task.files, fps: fps, out: task.out, job: job, report: report)
             }
-            finished += ext == "gif" ? min(task.files.count, gifMaxFrames) : task.files.count
+            finished += task.files.count
             outputs.append(task.out)
         }
         return outputs
@@ -262,42 +262,95 @@ enum Exporter {
         context.draw(image, in: rect)
     }
 
-    // GIFs are for short clips. ImageIO keeps every frame in memory until the file is finished (about 3 MB each
-    // at this size), so frames are shrunk and long selections are thinned to evenly spaced frames.
-    static let gifMaxFrames = 300
-    private static let gifMaxSide = 720.0
-
-    private static func encodeGIF(_ all: [URL], fps: Int, out: URL, job: ExportJob, report: (Int) -> Void) throws {
-        let files = all.count <= gifMaxFrames ? all : (0..<gifMaxFrames).map { all[$0 * all.count / gifMaxFrames] }
+    // Frames are decoded and reduced to palette indices several at a time; GIFWriter then writes them in order.
+    private static func encodeGIF(_ files: [URL], fps: Int, options: GIFOptions, out: URL, job: ExportJob, report: (Int) -> Void) throws {
         guard let last = files.last.map(pixelSize), last.width > 1, last.height > 1 else { throw ExportError.failed("could not read frame size") }
-        let scale = min(1, gifMaxSide / Double(max(last.width, last.height)))
+        let scale = min(1, Double(options.maxSide) / Double(max(last.width, last.height)))
         let width = max(2, Int((Double(last.width) * scale).rounded())), height = max(2, Int((Double(last.height) * scale).rounded()))
+        let tableSize = [64, 128, 256].contains(options.colors) ? options.colors : 256
+
+        // The palette comes from up to 16 evenly spaced frames, so it suits the whole clip without holding it in memory.
+        let histogram = GIFQuantizer.Histogram()
+        let samples = min(files.count, 16)
+        var sampled = [[UInt8]](repeating: [], count: samples)
+        sampled.withUnsafeMutableBufferPointer { slots in
+            let base = slots.baseAddress!
+            DispatchQueue.concurrentPerform(iterations: samples) { k in
+                base[k] = bgraFrame(files[k * files.count / samples], width: width, height: height)
+            }
+        }
+        if job.isCancelled { throw ExportError.cancelled }
+        for pixels in sampled { histogram.add(pixels, every: 3) }
+        let palette = GIFQuantizer.palette(histogram, colors: tableSize - 1)
+        let lookup = GIFQuantizer.lookup(for: palette)
+        let dither = options.dither ? (tableSize == 256 ? 8 : tableSize == 128 ? 12 : 16) : 0
 
         try? FileManager.default.removeItem(at: out)
-        guard let destination = CGImageDestinationCreateWithURL(out as CFURL, "com.compuserve.gif" as CFString, files.count, nil) else {
-            throw ExportError.failed("could not create the GIF")
-        }
-        CGImageDestinationSetProperties(destination, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]] as CFDictionary)
-        let frameProperties = [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: max(0.02, 1 / Double(fps))]] as CFDictionary
-        for (index, file) in files.enumerated() {
-            if job.isCancelled {
-                try? FileManager.default.removeItem(at: out)
-                throw ExportError.cancelled
-            }
-            try autoreleasepool {
-                guard let context = CGContext(
-                    data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                    bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
-                ) else { throw ExportError.failed("out of memory") }
-                draw(file, in: context, width: width, height: height, maxPixels: max(width, height))
-                guard let image = context.makeImage() else { throw ExportError.failed("out of memory") }
-                CGImageDestinationAddImage(destination, image, frameProperties)
-            }
-            report(index + 1)
-        }
-        guard CGImageDestinationFinalize(destination) else {
+        let writer = try GIFWriter(url: out, width: width, height: height, palette: palette, tableSize: tableSize)
+        func abort(_ error: Error) -> Error {
+            try? writer.finish()
             try? FileManager.default.removeItem(at: out)
-            throw ExportError.failed("could not write the GIF")
+            return error
         }
+        let batch = max(2, ProcessInfo.processInfo.activeProcessorCount)
+        func renderBatch(from start: Int) -> [[UInt8]] {
+            let count = min(batch, files.count - start)
+            var frames = [[UInt8]](repeating: [], count: count)
+            frames.withUnsafeMutableBufferPointer { slots in
+                let base = slots.baseAddress!
+                DispatchQueue.concurrentPerform(iterations: count) { i in
+                    let pixels = bgraFrame(files[start + i], width: width, height: height)
+                    base[i] = GIFQuantizer.indices(bgra: pixels, width: width, height: height, lookup: lookup, dither: dither)
+                }
+            }
+            return frames
+        }
+
+        // The next batch is prepared while the current one is compressed and written.
+        var index = 0
+        do {
+            var current = renderBatch(from: 0)
+            while index < files.count {
+                if job.isCancelled { throw ExportError.cancelled }
+                let nextStart = index + current.count
+                var next: [[UInt8]] = []
+                let preparing = DispatchGroup()
+                if nextStart < files.count {
+                    DispatchQueue.global(qos: .userInitiated).async(group: preparing) { next = renderBatch(from: nextStart) }
+                }
+                do {
+                    for (i, indices) in current.enumerated() {
+                        // Delays are whole hundredths of a second; rounding the running total keeps the average speed exact.
+                        let n = Double(index + i)
+                        let delay = Int(((n + 1) * 100 / Double(fps)).rounded()) - Int((n * 100 / Double(fps)).rounded())
+                        try writer.add(indices: indices, delay: delay)
+                    }
+                } catch {
+                    preparing.wait()
+                    throw error
+                }
+                preparing.wait()
+                index = nextStart
+                current = next
+                report(index)
+            }
+            try writer.finish()
+        } catch {
+            throw abort(error)
+        }
+    }
+
+    // One frame as BGRA bytes at the target size, scaled to fit and centred on black.
+    private static func bgraFrame(_ file: URL, width: Int, height: Int) -> [UInt8] {
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        pixels.withUnsafeMutableBytes { raw in
+            guard let context = CGContext(
+                data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+            ) else { return }
+            draw(file, in: context, width: width, height: height, maxPixels: max(width, height))
+        }
+        return pixels
     }
 }
