@@ -2,16 +2,16 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleIdentifier</key>
-	<string>dev.local.sstl</string>
-	<key>CFBundleExecutable</key>
-	<string>SSTL</string>
-	<key>CFBundleName</key>
-	<string>Screenshots Timelapse</string>
 	<key>CFBundleDisplayName</key>
 	<string>Screenshots Timelapse</string>
+	<key>CFBundleExecutable</key>
+	<string>SSTL</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>dev.local.sstl</string>
+	<key>CFBundleName</key>
+	<string>Screenshots Timelapse</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
