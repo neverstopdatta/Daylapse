@@ -64,7 +64,7 @@ rm -f "$ZIP"
 ditto -c -k --keepParent "$APP" "$ZIP"
 
 git add Info.plist
-git commit -m "Release $TAG"
+git diff --cached --quiet || git commit -m "Release $TAG"
 git tag -a "$TAG" -m "Screenshots Timelapse $VERSION"
 git push origin main "$TAG"
 

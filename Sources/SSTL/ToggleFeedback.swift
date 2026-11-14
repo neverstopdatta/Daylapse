@@ -40,7 +40,12 @@ enum ToggleFeedback {
             guard current.authorizationStatus == .authorized else { return }
             let content = UNMutableNotificationContent()
             content.title = title
-            center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+            let id = UUID().uuidString
+            center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+            // One-time alert: drop it from Notification Center once the banner has had time to show.
+            DispatchQueue.global().asyncAfter(deadline: .now() + 4) {
+                center.removeDeliveredNotifications(withIdentifiers: [id])
+            }
         }
     }
 

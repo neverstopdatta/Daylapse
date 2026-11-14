@@ -1,12 +1,12 @@
 # Screenshots Timelapse
 
-A small macOS menu bar app that takes a screenshot on a timer and exports each day as a timelapse video.
+A small macOS menu bar app that takes screenshots on a timer and exports them as a timelapse video.
 
 Screenshots Timelapse is an independent project. It is not affiliated with or endorsed by any other screenshot or timelapse app.
 
 ## Features
 
-- Captures the screen every N seconds (default 10), with optional capture on start
+- Captures the screen every N seconds, with optional capture on start
 - Choose which display to capture (all, the main one, or a specific screen) and the image format (JPEG, HEIC or PNG)
 - Block or allow specific apps so they never appear in frames
 - Optionally show or hide the wallpaper, desktop icons and notifications
